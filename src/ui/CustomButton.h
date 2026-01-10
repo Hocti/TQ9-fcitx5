@@ -18,7 +18,7 @@ public:
 
   int getId() const { return m_id; }
 
-signals:
+Q_SIGNALS:
   void clicked(int id);
 
 protected:

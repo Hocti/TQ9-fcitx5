@@ -37,7 +37,7 @@ private:
   AppConfig config_;
 
   // Qt Loop handling
-  static QApplication *qApp;
+  static QApplication *myQApp;
   static std::thread qtThread;
   static std::atomic<bool> qtRunning;
 };

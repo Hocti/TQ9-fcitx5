@@ -15,7 +15,7 @@ public:
   CustomButton *getButton(int id);
   void reset();
 
-signals:
+Q_SIGNALS:
   void buttonClicked(int id);
 
 protected:

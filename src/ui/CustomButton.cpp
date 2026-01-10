@@ -74,7 +74,7 @@ void CustomButton::paintEvent(QPaintEvent *event) {
 
 void CustomButton::mousePressEvent(QMouseEvent *event) {
   if (event->button() == Qt::LeftButton) {
-    emit clicked(m_id);
+    Q_EMIT clicked(m_id);
   }
   QWidget::mousePressEvent(event);
 }

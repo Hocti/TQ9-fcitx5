@@ -1,10 +1,13 @@
 #include "CustomEngine.h"
 #include <QMetaObject>
 #include <QTimer>
+#include <fcitx-utils/key.h>
+#include <fcitx-utils/keysym.h>
+#include <fcitx-utils/standardpath.h>
+#include <fcitx/addonmanager.h>
 #include <fcitx/inputcontext.h>
-#include <fcitx/keys.h>
 
-QApplication *CustomEngine::qApp = nullptr;
+QApplication *CustomEngine::myQApp = nullptr;
 std::thread CustomEngine::qtThread;
 std::atomic<bool> CustomEngine::qtRunning{false};
 
@@ -19,7 +22,7 @@ CustomEngine::CustomEngine(fcitx::Instance *instance) : instance_(instance) {
 
   // Create Window in Qt Thread
   QMetaObject::invokeMethod(
-      qApp,
+      myQApp,
       [this]() {
         window_ = std::make_unique<FloatingWindow>();
         window_->initialize(config_);
@@ -54,16 +57,16 @@ CustomEngine::CustomEngine(fcitx::Instance *instance) : instance_(instance) {
 
 CustomEngine::~CustomEngine() {
   QMetaObject::invokeMethod(
-      qApp, [this]() { window_.reset(); }, Qt::BlockingQueuedConnection);
-  // Note: Not terminating qApp as it might be shared or hard to stop safely
+      myQApp, [this]() { window_.reset(); }, Qt::BlockingQueuedConnection);
+  // Note: Not terminating myQApp as it might be shared or hard to stop safely
 }
 
 void CustomEngine::ensureQtApp() {
-  if (qApp)
+  if (myQApp)
     return;
 
   if (QCoreApplication::instance()) {
-    qApp = qobject_cast<QApplication *>(QCoreApplication::instance());
+    myQApp = qobject_cast<QApplication *>(QCoreApplication::instance());
     return;
   }
 
@@ -74,13 +77,13 @@ void CustomEngine::ensureQtApp() {
     char appName[] = "fcitx5-custom";
     char *argv[] = {appName, nullptr};
     QApplication app(argc, argv);
-    qApp = &app;
+    myQApp = &app;
     app.setQuitOnLastWindowClosed(false);
     app.exec();
     qtRunning = false;
   });
 
-  while (!qApp) {
+  while (!myQApp) {
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
 }
@@ -90,7 +93,7 @@ void CustomEngine::activate(const fcitx::InputMethodEntry &entry,
   Q_UNUSED(entry);
   Q_UNUSED(event);
   QMetaObject::invokeMethod(
-      qApp,
+      myQApp,
       [this]() {
         if (window_)
           window_->show();
@@ -103,7 +106,7 @@ void CustomEngine::deactivate(const fcitx::InputMethodEntry &entry,
   Q_UNUSED(entry);
   Q_UNUSED(event);
   QMetaObject::invokeMethod(
-      qApp,
+      myQApp,
       [this]() {
         if (window_)
           window_->hide();
@@ -125,7 +128,7 @@ void CustomEngine::keyEvent(const fcitx::InputMethodEntry &entry,
     return;
 
   auto key = keyEvent.key();
-  if (!key.isKeypad())
+  if (!key.isKeyPad())
     return;
 
   keyEvent.filterAndAccept(); // Consume the key
@@ -151,7 +154,7 @@ void CustomEngine::keyEvent(const fcitx::InputMethodEntry &entry,
 void CustomEngine::logicDot(fcitx::InputContext *ic) {
   Q_UNUSED(ic);
   QMetaObject::invokeMethod(
-      qApp,
+      myQApp,
       [this]() {
         if (window_)
           window_->reset();
@@ -163,7 +166,7 @@ void CustomEngine::logicNumber(fcitx::InputContext *ic, int number) {
   if (number <= 6) {
     // Change button state
     QMetaObject::invokeMethod(
-        qApp,
+        myQApp,
         [this, number]() {
           if (window_) {
             auto *btn = window_->getButton(number);
