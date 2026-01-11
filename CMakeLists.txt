@@ -55,6 +55,7 @@ target_link_libraries(fcitx5-custom-ui
     Qt6::Widgets
     Qt6::Gui
     LayerShellQt::Interface
+    ${SQLITE3_LIBRARIES}
 )
 
 target_include_directories(fcitx5-custom-ui PRIVATE

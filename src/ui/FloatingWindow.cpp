@@ -1,5 +1,6 @@
 #include "FloatingWindow.h"
 #include <QApplication>
+#include <QCursor>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QTimer>
@@ -14,6 +15,7 @@ FloatingWindow::FloatingWindow(QWidget *parent)
   setAttribute(Qt::WA_TranslucentBackground);
   setAttribute(Qt::WA_ShowWithoutActivating);
   setFocusPolicy(Qt::NoFocus);
+  setMouseTracking(true); // Enable mouse tracking for hover cursor updates
 
   setMinimumSize(100, 100);
   // Position at top-right corner initially
@@ -98,23 +100,150 @@ void FloatingWindow::paintEvent(QPaintEvent *event) {
   painter.setPen(Qt::NoPen);
   painter.drawRoundedRect(rect(), 10, 10);
 
-  // Resize handle hint (bottom right)
-  painter.setPen(Qt::black);
-  painter.drawLine(width() - 10, height(), width(), height() - 10);
+  // Draw resize handles on corners and edges
+  painter.setPen(QPen(Qt::darkGray, 2));
+  int handleSize = 8;
+
+  // Bottom-right corner (main resize handle)
+  painter.drawLine(width() - handleSize, height(), width(),
+                   height() - handleSize);
+  painter.drawLine(width() - handleSize - 4, height(), width(),
+                   height() - handleSize - 4);
+
+  // You can add more visual hints for other edges if desired
 }
 
 void FloatingWindow::mousePressEvent(QMouseEvent *event) {
   if (event->button() == Qt::LeftButton) {
-    m_dragPosition =
-        event->globalPosition().toPoint() - frameGeometry().topLeft();
+    m_resizeEdge = getResizeEdge(event->pos());
+    if (m_resizeEdge != None) {
+      m_isResizing = true;
+      m_isDragging = false;
+    } else {
+      m_isResizing = false;
+      m_isDragging = true;
+      m_dragPosition =
+          event->globalPosition().toPoint() - frameGeometry().topLeft();
+    }
     event->accept();
   }
 }
 
 void FloatingWindow::mouseMoveEvent(QMouseEvent *event) {
-  if (event->buttons() & Qt::LeftButton) {
+  if (!(event->buttons() & Qt::LeftButton)) {
+    // Just hovering - update cursor based on position
+    int edge = getResizeEdge(event->pos());
+    updateCursor(edge);
+    return;
+  }
+
+  if (m_isResizing) {
+    // Fixed ratio resize based on config aspect ratio
+    QPoint globalPos = event->globalPosition().toPoint();
+    QRect geom = frameGeometry();
+
+    // Calculate aspect ratio from config
+    float aspectRatio =
+        (float)m_baseConfig.windowWidth / m_baseConfig.windowHeight;
+
+    int minW = m_baseConfig.minWidth;
+    int maxW = m_baseConfig.maxWidth;
+    int minH = (int)(minW / aspectRatio);
+    int maxH = (int)(maxW / aspectRatio);
+
+    int newWidth = geom.width();
+    int newHeight = geom.height();
+    int newLeft = geom.left();
+    int newTop = geom.top();
+
+    // Calculate new size based on which edge is being dragged
+    if (m_resizeEdge & Right) {
+      newWidth = globalPos.x() - geom.left();
+    } else if (m_resizeEdge & Left) {
+      newWidth = geom.right() - globalPos.x() + 1;
+      newLeft = globalPos.x();
+    }
+
+    if (m_resizeEdge & Bottom) {
+      newHeight = globalPos.y() - geom.top();
+    } else if (m_resizeEdge & Top) {
+      newHeight = geom.bottom() - globalPos.y() + 1;
+      newTop = globalPos.y();
+    }
+
+    // Determine which dimension to use for maintaining aspect ratio
+    // Use the larger change to drive the resize
+    int targetWidth, targetHeight;
+    if (m_resizeEdge & (Left | Right)) {
+      // Width-driven resize
+      targetWidth = qBound(minW, newWidth, maxW);
+      targetHeight = (int)(targetWidth / aspectRatio);
+    } else if (m_resizeEdge & (Top | Bottom)) {
+      // Height-driven resize
+      targetHeight = qBound(minH, newHeight, maxH);
+      targetWidth = (int)(targetHeight * aspectRatio);
+    } else {
+      // Corner resize - use width
+      targetWidth = qBound(minW, newWidth, maxW);
+      targetHeight = (int)(targetWidth / aspectRatio);
+    }
+
+    // Adjust position for left/top edge resize
+    if (m_resizeEdge & Left) {
+      newLeft = geom.right() - targetWidth + 1;
+    }
+    if (m_resizeEdge & Top) {
+      newTop = geom.bottom() - targetHeight + 1;
+    }
+
+    setGeometry(newLeft, newTop, targetWidth, targetHeight);
+    event->accept();
+  } else {
+    // Drag the window
     move(event->globalPosition().toPoint() - m_dragPosition);
     event->accept();
+  }
+}
+
+void FloatingWindow::mouseReleaseEvent(QMouseEvent *event) {
+  if (event->button() == Qt::LeftButton) {
+    m_isResizing = false;
+    m_isDragging = false;
+    m_resizeEdge = None;
+    updateCursor(getResizeEdge(event->pos()));
+  }
+  QWidget::mouseReleaseEvent(event);
+}
+
+int FloatingWindow::getResizeEdge(const QPoint &pos) const {
+  int edge = None;
+
+  if (pos.x() <= RESIZE_MARGIN) {
+    edge |= Left;
+  } else if (pos.x() >= width() - RESIZE_MARGIN) {
+    edge |= Right;
+  }
+
+  if (pos.y() <= RESIZE_MARGIN) {
+    edge |= Top;
+  } else if (pos.y() >= height() - RESIZE_MARGIN) {
+    edge |= Bottom;
+  }
+
+  return edge;
+}
+
+void FloatingWindow::updateCursor(int edge) {
+  if (edge == None) {
+    setCursor(Qt::ArrowCursor);
+  } else if (edge == (Top | Left) || edge == (Bottom | Right)) {
+    setCursor(Qt::SizeFDiagCursor);
+  } else if (edge == (Top | Right) || edge == (Bottom | Left)) {
+    setCursor(Qt::SizeBDiagCursor);
+  } else if (edge & (Left | Right)) {
+    setCursor(Qt::SizeHorCursor);
+  } else if (edge & (Top | Bottom)) {
+    setCursor(Qt::SizeVerCursor);
   }
 }
 

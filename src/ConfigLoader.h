@@ -1,21 +1,23 @@
 #pragma once
 
-#include <vector>
-#include <QString>
 #include <QRect>
+#include <QString>
+#include <vector>
 
 struct ButtonConfig {
-    int id;
-    QRect rect;
+  int id;
+  QRect rect;
 };
 
 struct AppConfig {
-    int windowWidth;
-    int windowHeight;
-    std::vector<ButtonConfig> buttons;
+  int windowWidth;
+  int windowHeight;
+  int minWidth = 100;
+  int maxWidth = 800;
+  std::vector<ButtonConfig> buttons;
 };
 
 class ConfigLoader {
 public:
-    static AppConfig load(const QString& path);
+  static AppConfig load(const QString &path);
 };

@@ -1,7 +1,9 @@
 {
   "window": {
     "width": 240,
-    "height": 320
+    "height": 360,
+    "minWidth": 120,
+    "maxWidth": 480
   },
   "buttons": [
     { "id": 0, "x": 0, "y": 240, "w": 160, "h": 80 },

@@ -32,6 +32,14 @@ if [ -z "$LIB_PATH" ]; then
     exit 1
 fi
 
+# Copy data files (images and database) to the install share path
+DATA_DEST="$SHARE_PATH/fcitx5/custom-input"
+echo "Copying data files to $DATA_DEST..."
+mkdir -p "$DATA_DEST"
+cp -r "$(pwd)/data/img" "$DATA_DEST/"
+cp "$(pwd)/data/dataset.db" "$DATA_DEST/"
+echo "Data files copied."
+
 # 3. Setup Environment for Debugging
 # Create a temp config dir to avoid messing with user's real config
 CONFIG_DIR="$INSTALL_DIR/config"

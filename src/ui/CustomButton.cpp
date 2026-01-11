@@ -9,6 +9,7 @@ CustomButton::CustomButton(int id, QWidget *parent)
 
 void CustomButton::setText(const QString &text) {
   m_text = text;
+  // Font size will be calculated in paintEvent based on text length
   update();
 }
 
@@ -39,6 +40,11 @@ void CustomButton::setDisabledState(bool disabled) {
   update();
 }
 
+void CustomButton::setSmallText(bool small) {
+  m_smallText = small;
+  update();
+}
+
 void CustomButton::paintEvent(QPaintEvent *event) {
   Q_UNUSED(event);
   QPainter painter(this);
@@ -58,18 +64,31 @@ void CustomButton::paintEvent(QPaintEvent *event) {
     painter.drawImage(imgRect, m_image);
   }
 
-  // Draw Text (Bottom-Right)
+  // Draw Text
   if (!m_text.isEmpty()) {
     painter.setPen(Qt::black);
     QFont font = painter.font();
-    font.setPixelSize(height() / 3);
-    painter.setFont(font);
 
-    // Align bottom right with some padding
-    QRect textRect(width() * 0.2, height() * 0.4, width() * 0.8,
-                   height() * 0.6);
-    painter.drawText(
-        textRect, Qt::AlignBottom | Qt::AlignRight | Qt::TextWordWrap, m_text);
+    // Calculate font size based on text length: 64 / text-length
+    int textLen = m_text.length();
+    int fontSize = (textLen > 0) ? (64 / textLen) : 64;
+    fontSize = qMax(8, fontSize); // Minimum font size
+
+    if (m_smallText) {
+      // Small text in bottom-right corner
+      font.setPixelSize(height() / 3);
+      painter.setFont(font);
+      QRect textRect(width() * 0.2, height() * 0.4, width() * 0.8,
+                     height() * 0.6);
+      painter.drawText(textRect,
+                       Qt::AlignBottom | Qt::AlignRight | Qt::TextWordWrap,
+                       m_text);
+    } else {
+      // Larger text centered in button
+      font.setPixelSize(fontSize);
+      painter.setFont(font);
+      painter.drawText(rect(), Qt::AlignCenter | Qt::TextWordWrap, m_text);
+    }
   }
 
   // Draw Border
