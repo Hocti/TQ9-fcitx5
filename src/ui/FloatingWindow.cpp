@@ -3,9 +3,11 @@
 #include <QPainter>
 
 FloatingWindow::FloatingWindow(QWidget *parent)
-    : QWidget(parent,
-              Qt::Window | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint) {
+    : QWidget(parent, Qt::Window | Qt::WindowStaysOnTopHint |
+                          Qt::FramelessWindowHint |
+                          Qt::WindowDoesNotAcceptFocus) {
   setAttribute(Qt::WA_TranslucentBackground);
+  setAttribute(Qt::WA_ShowWithoutActivating);
   setMinimumSize(100, 100);
 }
 

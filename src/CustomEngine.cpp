@@ -1,4 +1,5 @@
 #include "CustomEngine.h"
+#include <QDir>
 #include <QMetaObject>
 #include <QTimer>
 #include <fcitx-utils/key.h>
@@ -12,11 +13,20 @@ std::thread CustomEngine::qtThread;
 std::atomic<bool> CustomEngine::qtRunning{false};
 
 CustomEngine::CustomEngine(fcitx::Instance *instance) : instance_(instance) {
-  db_.init("emoji.db");
-  config_ = ConfigLoader::load(
-      fcitx::StandardPath::global()
-          .locate(fcitx::StandardPath::Type::Data, "custom-input/config.json")
-          .c_str());
+  // Ensure the directory exists for our database
+  std::string userPkgData = fcitx::StandardPath::global().userDirectory(
+      fcitx::StandardPath::Type::PkgData);
+  QDir dir(QString::fromStdString(userPkgData));
+  dir.mkpath("custom-input");
+
+  std::string dbPath = userPkgData + "/custom-input/emoji.db";
+  db_.init(dbPath);
+
+  // Load config from search paths (PkgData should include share/fcitx5/)
+  config_ = ConfigLoader::load(fcitx::StandardPath::global()
+                                   .locate(fcitx::StandardPath::Type::PkgData,
+                                           "custom-input/config.json")
+                                   .c_str());
 
   ensureQtApp();
 
@@ -58,7 +68,14 @@ CustomEngine::CustomEngine(fcitx::Instance *instance) : instance_(instance) {
 CustomEngine::~CustomEngine() {
   QMetaObject::invokeMethod(
       myQApp, [this]() { window_.reset(); }, Qt::BlockingQueuedConnection);
-  // Note: Not terminating myQApp as it might be shared or hard to stop safely
+
+  // Signal Qt thread to stop if we own it
+  if (qtRunning) {
+    if (myQApp)
+      myQApp->quit();
+    if (qtThread.joinable())
+      qtThread.join();
+  }
 }
 
 void CustomEngine::ensureQtApp() {
@@ -71,21 +88,24 @@ void CustomEngine::ensureQtApp() {
   }
 
   // Start Qt thread
+  // Start Qt thread
   qtRunning = true;
-  qtThread = std::thread([]() {
+  std::promise<void> initPromise;
+  auto initFuture = initPromise.get_future();
+
+  qtThread = std::thread([&initPromise]() {
     int argc = 1;
     char appName[] = "fcitx5-custom";
     char *argv[] = {appName, nullptr};
     QApplication app(argc, argv);
     myQApp = &app;
     app.setQuitOnLastWindowClosed(false);
+    initPromise.set_value();
     app.exec();
     qtRunning = false;
   });
 
-  while (!myQApp) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-  }
+  initFuture.wait();
 }
 
 void CustomEngine::activate(const fcitx::InputMethodEntry &entry,
@@ -95,8 +115,9 @@ void CustomEngine::activate(const fcitx::InputMethodEntry &entry,
   QMetaObject::invokeMethod(
       myQApp,
       [this]() {
-        if (window_)
+        if (window_) {
           window_->show();
+        }
       },
       Qt::QueuedConnection);
 }
@@ -179,7 +200,7 @@ void CustomEngine::logicNumber(fcitx::InputContext *ic, int number) {
         Qt::QueuedConnection);
   } else if (number == 7) {
     // Type 1 chinese word
-    ic->commitString("你好");
+    ic->commitString("你");
   } else if (number == 8) {
     // Type 10 chinese words
     ic->commitString("你好你好你好你好你好你好你好你好你好你好");
@@ -213,6 +234,12 @@ void CustomEngine::logicSlash(fcitx::InputContext *ic) {
   // if (surrounding.isValid() && !surrounding.selection().isEmpty()) ...
   // This requires the app to support it.
   // Implementing standard "“”" insert for now.
+}
+
+std::vector<fcitx::InputMethodEntry> CustomEngine::listInputMethods() {
+  std::vector<fcitx::InputMethodEntry> entries;
+  entries.emplace_back("custom_input", "Custom Input", "zh", "custom-input");
+  return entries;
 }
 
 fcitx::AddonInstance *

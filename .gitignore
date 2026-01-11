@@ -5,4 +5,7 @@ build_release
 *.o
 install_debug
 install_release
-fcitx5_debug.log
+*.log
+.cache
+compile_commands.json
+data/dataset.db

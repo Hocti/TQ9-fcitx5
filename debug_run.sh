@@ -32,43 +32,114 @@ if [ -z "$LIB_PATH" ]; then
     exit 1
 fi
 
-# 3. Setup Environment
-# Append existing XDG_DATA_DIRS if it exists, otherwise default to system paths
-# (Usually /usr/local/share:/usr/share)
-export XDG_DATA_DIRS="$SHARE_PATH:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+# 3. Setup Environment for Debugging
+# Create a temp config dir to avoid messing with user's real config
+CONFIG_DIR="$INSTALL_DIR/config"
+mkdir -p "$CONFIG_DIR/fcitx5"
 
-# FCITX_ADDON_DIRS tells fcitx5 where to load the shared library
+# Setup XDG paths
+export XDG_DATA_DIRS="$SHARE_PATH:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+export XDG_CONFIG_HOME="$CONFIG_DIR"
+# Define FCITX_ADDON_DIRS to include our built lib and system fcitx5 libs
 export FCITX_ADDON_DIRS="$LIB_PATH:/usr/lib/x86_64-linux-gnu/fcitx5"
+
+# Pre-configure profile to enable our input method
+# We need to create 'profile' file in $CONFIG_DIR/fcitx5/
+cat > "$CONFIG_DIR/fcitx5/profile" <<EOF
+[Groups/0]
+# Group Name
+Name=Default
+# Layout
+Default Layout=us
+# Default Input Method
+DefaultIM=custom_input
+
+[Groups/0/Items/0]
+# Name
+Name=keyboard-us
+# Layout
+Layout=
+
+[Groups/0/Items/1]
+# Name
+Name=custom_input
+# Layout
+Layout=
+
+[GroupOrder]
+0=Default
+EOF
 
 echo "----------------------------------------------------------------"
 echo "Starting Fcitx5 in Debug Mode..."
 echo "Environment configured:"
 echo "XDG_DATA_DIRS=$XDG_DATA_DIRS"
+echo "XDG_CONFIG_HOME=$XDG_CONFIG_HOME"
 echo "FCITX_ADDON_DIRS=$FCITX_ADDON_DIRS"
 echo ""
-echo "Replacing running Fcitx5 instance..."
+# 5. Run & Monitor
+export XDG_CACHE_HOME="$INSTALL_DIR/cache"
+mkdir -p "$XDG_CACHE_HOME"
+
+echo "----------------------------------------------------------------"
+echo "Starting Fcitx5 in Debug Mode..."
 echo "Logs are being written to fcitx5_debug.log"
+echo "Tailing log file (Ctrl+C to stop)..."
 echo "----------------------------------------------------------------"
-echo ">>> PRESS ENTER TO STOP DEBUGGING AND RESTORE SYSTEM FCITX5 <<<"
-echo "----------------------------------------------------------------"
 
-# Run fcitx5 in background (-r replaces existing). 
-# We assume fcitx5 is in path. 
-# We use nohup to ensure it detaches slightly but we keep track of it if needed.
-# Actually standard fcitx5 -r returns 0 after launching the daemon.
-fcitx5 -r -d > fcitx5_debug.log 2>&1
+# Run fcitx5
+fcitx5 -r -d > fcitx5_debug.log 2>&1 &
+FCITX_PID=$!
 
-# Wait for user input
-read -p ""
+# Function to clean up
+cleanup() {
+    echo ""
+    echo "Stopping Debug Fcitx5 (PID $FCITX_PID)..."
+    kill $FCITX_PID 2>/dev/null
+    wait $FCITX_PID 2>/dev/null
+    
+    # Kill background monitor if it exists
+    if [ -n "$MONITOR_PID" ]; then
+        kill $MONITOR_PID 2>/dev/null
+    fi
+    if [ -n "$TAIL_PID" ]; then
+        kill $TAIL_PID 2>/dev/null
+    fi
 
-# 4. Restore
-echo "Restoring system Fcitx5..."
+    echo "Restoring system Fcitx5..."
+    unset XDG_DATA_DIRS
+    unset XDG_CONFIG_HOME
+    unset FCITX_ADDON_DIRS
+    unset XDG_CACHE_HOME
+    
+    fcitx5 -r -d > /dev/null 2>&1 &
+    echo "System Fcitx5 restored."
+}
 
-# Unset the variables so we don't restart the debug version
-unset XDG_DATA_DIRS
-unset FCITX_ADDON_DIRS
+# Trap signals
+trap cleanup EXIT INT TERM
 
-# Restart normal fcitx5
-fcitx5 -r -d > /dev/null 2>&1 &
+# Tail logs in background
+tail -f fcitx5_debug.log &
+TAIL_PID=$!
 
-echo "System Fcitx5 restored."
+# Monitor status in background
+(
+    while kill -0 $FCITX_PID 2>/dev/null; do
+        CURRENT=$(fcitx5-remote -n)
+        # Verify if our input method is active
+        if [ "$CURRENT" == "custom_input" ]; then
+             echo -e "\n[STATUS] Custom Input is ACTIVE!"
+        elif [ "$CURRENT" == "keyboard-us" ]; then
+             # Don't spam too much
+             sleep 1
+        fi
+        sleep 2
+    done
+) &
+MONITOR_PID=$!
+
+# Wait for user to press Enter to stop
+echo ">>> PRESS ENTER TO STOP DEBUGGING <<<"
+read -r
+

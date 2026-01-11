@@ -8,8 +8,10 @@
 #include <fcitx/addonfactory.h>
 #include <fcitx/inputmethodengine.h>
 #include <fcitx/instance.h>
+#include <future>
 #include <memory>
 #include <thread>
+#include <vector>
 
 class CustomEngine : public fcitx::InputMethodEngineV2 {
 public:
@@ -24,6 +26,8 @@ public:
                 fcitx::KeyEvent &keyEvent) override;
   void reset(const fcitx::InputMethodEntry &entry,
              fcitx::InputContextEvent &event) override;
+
+  std::vector<fcitx::InputMethodEntry> listInputMethods() override;
 
 private:
   void ensureQtApp();
