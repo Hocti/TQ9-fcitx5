@@ -224,14 +224,16 @@ void CustomEngine::keyEvent(const fcitx::InputMethodEntry &entry,
 void CustomEngine::logicDot(fcitx::InputContext *ic) { sendToUI("RESET"); }
 
 void CustomEngine::logicNumber(fcitx::InputContext *ic, int number) {
-  if (number <= 6) {
+  if (number < 6) {
     // TODO: Send "BUTTON_HIGHLIGHT <n>" to UI?
     // UI assumes control? UI click triggers highlight?
     // "Change button state"
+  } else if (number == 6) {
+    ic->commitString(std::to_string(number));
   } else if (number == 7) {
     ic->commitString("你");
   } else if (number == 8) {
-    ic->commitString("好好");
+    ic->commitString("好8好");
   } else if (number == 9) {
     std::string emoji = db_.getRandomEmoji();
     ic->commitString(emoji);

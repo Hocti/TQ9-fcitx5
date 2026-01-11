@@ -9,6 +9,7 @@
 // LayerShellQt for Wayland always-on-top
 #include <LayerShellQt/Shell>
 #include <LayerShellQt/Window>
+#include <iostream>
 
 FloatingWindow::FloatingWindow(QWidget *parent)
     : QWidget(parent, Qt::FramelessWindowHint) {
@@ -35,14 +36,18 @@ void FloatingWindow::setupLayerShell() {
     LayerShellQt::Window *layerWindow = LayerShellQt::Window::get(win);
     if (layerWindow) {
       // Set the window to the overlay layer (always on top)
-      layerWindow->setLayer(LayerShellQt::Window::LayerOverlay);
+      layerWindow->setLayer(LayerShellQt::Window::LayerTop);
       // Don't reserve any exclusive zone
       layerWindow->setExclusiveZone(0);
       // No keyboard interaction to avoid stealing focus
       layerWindow->setKeyboardInteractivity(
           LayerShellQt::Window::KeyboardInteractivityNone);
-      // No anchors - floating window
-      layerWindow->setAnchors(LayerShellQt::Window::AnchorNone);
+      // Anchor to top-left corner - we use margins to position
+      layerWindow->setAnchors(LayerShellQt::Window::Anchors(
+          LayerShellQt::Window::AnchorTop | LayerShellQt::Window::AnchorLeft));
+      // Set initial position using margins
+      layerWindow->setMargins(
+          QMargins(m_windowPosition.x(), m_windowPosition.y(), 0, 0));
 
       std::cerr << "[FloatingWindow] LayerShellQt configured for overlay layer"
                 << std::endl;
@@ -51,6 +56,31 @@ void FloatingWindow::setupLayerShell() {
           << "[FloatingWindow] Warning: Could not get LayerShellQt::Window"
           << std::endl;
     }
+  }
+}
+
+void FloatingWindow::updateLayerShellPosition() {
+  QWindow *win = windowHandle();
+  if (!win) {
+    std::cerr << "[FloatingWindow] updateLayerShellPosition: no windowHandle"
+              << std::endl;
+    return;
+  }
+
+  LayerShellQt::Window *layerWindow = LayerShellQt::Window::get(win);
+  if (layerWindow) {
+    std::cerr << "[FloatingWindow] Setting margins: left="
+              << m_windowPosition.x() << " top=" << m_windowPosition.y()
+              << std::endl;
+    // Use left margin for X, top margin for Y
+    layerWindow->setMargins(
+        QMargins(m_windowPosition.x(), m_windowPosition.y(), 0, 0));
+  } else {
+    std::cerr << "[FloatingWindow] updateLayerShellPosition: no layerWindow"
+              << std::endl;
+  }
+  if (windowHandle()) {
+    windowHandle()->requestUpdate();
   }
 }
 
@@ -120,93 +150,103 @@ void FloatingWindow::mousePressEvent(QMouseEvent *event) {
       m_isResizing = true;
       m_isDragging = false;
     } else {
+      // For layer-shell, we track drag manually and update margins
       m_isResizing = false;
       m_isDragging = true;
-      m_dragPosition =
-          event->globalPosition().toPoint() - frameGeometry().topLeft();
+      m_dragStartPos = event->globalPosition().toPoint();
+      std::cerr << "[FloatingWindow] Drag started at: " << m_dragStartPos.x()
+                << "," << m_dragStartPos.y() << std::endl;
+      m_dragStartWindowPos = m_windowPosition;
     }
     event->accept();
   }
 }
 
 void FloatingWindow::mouseMoveEvent(QMouseEvent *event) {
-  if (!(event->buttons() & Qt::LeftButton)) {
-    // Just hovering - update cursor based on position
-    int edge = getResizeEdge(event->pos());
-    updateCursor(edge);
-    return;
-  }
-
-  if (m_isResizing) {
-    // Fixed ratio resize based on config aspect ratio
-    QPoint globalPos = event->globalPosition().toPoint();
-    QRect geom = frameGeometry();
-
-    // Calculate aspect ratio from config
-    float aspectRatio =
-        (float)m_baseConfig.windowWidth / m_baseConfig.windowHeight;
-
-    int minW = m_baseConfig.minWidth;
-    int maxW = m_baseConfig.maxWidth;
-    int minH = (int)(minW / aspectRatio);
-    int maxH = (int)(maxW / aspectRatio);
-
-    int newWidth = geom.width();
-    int newHeight = geom.height();
-    int newLeft = geom.left();
-    int newTop = geom.top();
-
-    // Calculate new size based on which edge is being dragged
-    if (m_resizeEdge & Right) {
-      newWidth = globalPos.x() - geom.left();
-    } else if (m_resizeEdge & Left) {
-      newWidth = geom.right() - globalPos.x() + 1;
-      newLeft = globalPos.x();
-    }
-
-    if (m_resizeEdge & Bottom) {
-      newHeight = globalPos.y() - geom.top();
-    } else if (m_resizeEdge & Top) {
-      newHeight = geom.bottom() - globalPos.y() + 1;
-      newTop = globalPos.y();
-    }
-
-    // Determine which dimension to use for maintaining aspect ratio
-    // Use the larger change to drive the resize
-    int targetWidth, targetHeight;
-    if (m_resizeEdge & (Left | Right)) {
-      // Width-driven resize
-      targetWidth = qBound(minW, newWidth, maxW);
-      targetHeight = (int)(targetWidth / aspectRatio);
-    } else if (m_resizeEdge & (Top | Bottom)) {
-      // Height-driven resize
-      targetHeight = qBound(minH, newHeight, maxH);
-      targetWidth = (int)(targetHeight * aspectRatio);
-    } else {
-      // Corner resize - use width
-      targetWidth = qBound(minW, newWidth, maxW);
-      targetHeight = (int)(targetWidth / aspectRatio);
-    }
-
-    // Adjust position for left/top edge resize
-    if (m_resizeEdge & Left) {
-      newLeft = geom.right() - targetWidth + 1;
-    }
-    if (m_resizeEdge & Top) {
-      newTop = geom.bottom() - targetHeight + 1;
-    }
-
-    setGeometry(newLeft, newTop, targetWidth, targetHeight);
-    event->accept();
-  } else {
-    // Drag the window
-    move(event->globalPosition().toPoint() - m_dragPosition);
-    event->accept();
-  }
+  // Only update cursor based on hover position
+  int edge = getResizeEdge(event->pos());
+  updateCursor(edge);
 }
 
 void FloatingWindow::mouseReleaseEvent(QMouseEvent *event) {
   if (event->button() == Qt::LeftButton) {
+    QPoint globalPos = event->globalPosition().toPoint();
+
+    if (m_isResizing) {
+      // Fixed ratio resize based on config aspect ratio
+      QRect geom = frameGeometry();
+
+      // Calculate aspect ratio from config
+      float aspectRatio =
+          (float)m_baseConfig.windowWidth / m_baseConfig.windowHeight;
+
+      int minW = m_baseConfig.minWidth;
+      int maxW = m_baseConfig.maxWidth;
+      int minH = (int)(minW / aspectRatio);
+      int maxH = (int)(maxW / aspectRatio);
+
+      int newWidth = geom.width();
+      int newHeight = geom.height();
+      int newLeft = geom.left();
+      int newTop = geom.top();
+
+      // Calculate new size based on which edge is being dragged
+      if (m_resizeEdge & Right) {
+        newWidth = globalPos.x() - geom.left();
+      } else if (m_resizeEdge & Left) {
+        newWidth = geom.right() - globalPos.x() + 1;
+        newLeft = globalPos.x();
+      }
+
+      if (m_resizeEdge & Bottom) {
+        newHeight = globalPos.y() - geom.top();
+      } else if (m_resizeEdge & Top) {
+        newHeight = geom.bottom() - globalPos.y() + 1;
+        newTop = globalPos.y();
+      }
+
+      // Determine which dimension to use for maintaining aspect ratio
+      // Use the larger change to drive the resize
+      int targetWidth, targetHeight;
+      if (m_resizeEdge & (Left | Right)) {
+        // Width-driven resize
+        targetWidth = qBound(minW, newWidth, maxW);
+        targetHeight = (int)(targetWidth / aspectRatio);
+      } else if (m_resizeEdge & (Top | Bottom)) {
+        // Height-driven resize
+        targetHeight = qBound(minH, newHeight, maxH);
+        targetWidth = (int)(targetHeight * aspectRatio);
+      } else {
+        // Corner resize - use width
+        targetWidth = qBound(minW, newWidth, maxW);
+        targetHeight = (int)(targetWidth / aspectRatio);
+      }
+
+      // Adjust position for left/top edge resize
+      if (m_resizeEdge & Left) {
+        newLeft = geom.right() - targetWidth + 1;
+      }
+      if (m_resizeEdge & Top) {
+        newTop = geom.bottom() - targetHeight + 1;
+      }
+
+      setGeometry(newLeft, newTop, targetWidth, targetHeight);
+    } else if (m_isDragging) {
+      // Calculate final position based on drag
+      std::cerr << "[FloatingWindow] Drag ended at: " << globalPos.x() << ","
+                << globalPos.y() << std::endl;
+
+      // Keep position non-negative
+      m_windowPosition.setX(qMax(0, m_dragStartWindowPos.x() + globalPos.x() -
+                                        m_dragStartPos.x()));
+      m_windowPosition.setY(qMax(0, m_dragStartWindowPos.y() + globalPos.y() -
+                                        m_dragStartPos.y()));
+
+      // Update layer shell margins
+      updateLayerShellPosition();
+    }
+
+    // Reset state
     m_isResizing = false;
     m_isDragging = false;
     m_resizeEdge = None;
@@ -254,7 +294,16 @@ void FloatingWindow::resizeEvent(QResizeEvent *event) {
 
 void FloatingWindow::showEvent(QShowEvent *event) {
   QWidget::showEvent(event);
+
+  // Re-apply LayerShell configuration each time the window is shown
+  // On Wayland, the surface may be destroyed when hidden, so we need to
+  // reconfigure LayerShell properties
+  setupLayerShell();
+  updateLayerShellPosition();
+
   raise();
+  std::cerr << "[FloatingWindow] showEvent: LayerShell reconfigured"
+            << std::endl;
 }
 
 void FloatingWindow::hideEvent(QHideEvent *event) { QWidget::hideEvent(event); }

@@ -2,8 +2,8 @@
 
 #include "../ConfigLoader.h"
 #include "CustomButton.h"
+#include <QMargins>
 #include <QWidget>
-#include <iostream>
 #include <vector>
 
 class FloatingWindow : public QWidget {
@@ -30,7 +30,6 @@ protected:
 private:
   AppConfig m_baseConfig;
   std::vector<CustomButton *> m_buttons;
-  QPoint m_dragPosition;
 
   // Resize handling
   enum ResizeEdge { None = 0, Left = 1, Right = 2, Top = 4, Bottom = 8 };
@@ -39,8 +38,14 @@ private:
   bool m_isDragging = false;
   static const int RESIZE_MARGIN = 10;
 
+  // Layer shell positioning (using margins from top-left anchor)
+  QPoint m_windowPosition{100, 100}; // Current position as margins
+  QPoint m_dragStartPos;             // Mouse position at drag start
+  QPoint m_dragStartWindowPos;       // Window position at drag start
+
   void updateLayout();
   void setupLayerShell();
+  void updateLayerShellPosition(); // Update margins for layer shell
   int getResizeEdge(const QPoint &pos) const;
   void updateCursor(int edge);
 };

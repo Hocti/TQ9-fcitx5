@@ -111,7 +111,7 @@ int main(int argc, char *argv[]) {
         buffer = buffer.mid(idx + 1);
         QString line = QString::fromUtf8(lineBytes).trimmed();
 
-        std::cerr << "[UI] Received: " << line.toStdString() << std::endl;
+        // std::cerr << "[UI] Received: " << line.toStdString() << std::endl;
 
         if (line == "SHOW") {
           if (!window.isVisible()) {

@@ -3,6 +3,23 @@
 # Configuration
 BUILD_DIR="build_debug"
 INSTALL_DIR="$(pwd)/install_debug"
+LOCK_FILE="/tmp/fcitx5_debug.lock"
+
+# Check if another debug session is already running
+if [ -f "$LOCK_FILE" ]; then
+    OLD_PID=$(cat "$LOCK_FILE")
+    if kill -0 "$OLD_PID" 2>/dev/null; then
+        echo "ERROR: Another debug session is already running (PID $OLD_PID)"
+        echo "Please stop that session first (press Enter in that terminal) before starting a new one."
+        exit 1
+    else
+        # Stale lock file, remove it
+        rm -f "$LOCK_FILE"
+    fi
+fi
+
+# Create lock file with our PID
+echo $$ > "$LOCK_FILE"
 
 # 1. Build
 echo "Building project..."
@@ -96,7 +113,16 @@ echo "Logs are being written to fcitx5_debug.log"
 echo "Tailing log file (Ctrl+C to stop)..."
 echo "----------------------------------------------------------------"
 
-# Run fcitx5
+# Kill UI process if it exists
+pkill -f "fcitx5-custom-ui" 2>/dev/null
+
+# Use replace mode (-r) to inject our addon into the running fcitx5
+# This avoids the D-Bus name conflict and works with auto-restarting systems
+echo "Launching Fcitx5 in replace mode with custom addon paths..."
+echo "(This will replace the currently running fcitx5 instance)"
+
+# The -r flag tells fcitx5 to replace any existing instance
+# The environment variables we set earlier will be picked up
 fcitx5 -r -d > fcitx5_debug.log 2>&1 &
 FCITX_PID=$!
 
@@ -115,14 +141,18 @@ cleanup() {
         kill $TAIL_PID 2>/dev/null
     fi
 
-    echo "Restoring system Fcitx5..."
+    # Remove lock file
+    rm -f "$LOCK_FILE"
+
+    echo "Debug session ended."
     unset XDG_DATA_DIRS
     unset XDG_CONFIG_HOME
     unset FCITX_ADDON_DIRS
     unset XDG_CACHE_HOME
     
-    fcitx5 -r -d > /dev/null 2>&1 &
-    echo "System Fcitx5 restored."
+    echo ""
+    echo "To restore system Fcitx5, run: fcitx5 -r -d &"
+    echo "(Not auto-restoring to avoid D-Bus conflicts with next debug run)"
 }
 
 # Trap signals
@@ -158,3 +188,15 @@ MONITOR_PID=$!
 echo ">>> PRESS ENTER TO STOP DEBUGGING <<<"
 read -r
 
+# Restore system Fcitx5 after debug session ends
+echo ""
+echo "Restoring system Fcitx5..."
+# Unset our custom environment variables before restoring
+unset FCITX_ADDON_DIRS
+unset XDG_DATA_DIRS
+unset XDG_CONFIG_HOME
+unset XDG_CACHE_HOME
+
+# Launch system fcitx5 in replace mode to take over
+fcitx5 -r -d > /dev/null 2>&1 &
+echo "System Fcitx5 restored."
