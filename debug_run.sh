@@ -40,6 +40,7 @@ mkdir -p "$CONFIG_DIR/fcitx5"
 # Setup XDG paths
 export XDG_DATA_DIRS="$SHARE_PATH:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
 export XDG_CONFIG_HOME="$CONFIG_DIR"
+export PATH="$INSTALL_DIR/bin:$PATH"
 # Define FCITX_ADDON_DIRS to include our built lib and system fcitx5 libs
 export FCITX_ADDON_DIRS="$LIB_PATH:/usr/lib/x86_64-linux-gnu/fcitx5"
 
@@ -56,13 +57,13 @@ DefaultIM=custom_input
 
 [Groups/0/Items/0]
 # Name
-Name=keyboard-us
+Name=custom_input
 # Layout
 Layout=
 
 [Groups/0/Items/1]
 # Name
-Name=custom_input
+Name=keyboard-us
 # Layout
 Layout=
 
@@ -125,14 +126,20 @@ TAIL_PID=$!
 
 # Monitor status in background
 (
+    # Try to switch to custom_input if not active
+    fcitx5-remote -s custom_input
+    
     while kill -0 $FCITX_PID 2>/dev/null; do
         CURRENT=$(fcitx5-remote -n)
+        echo "[MONITOR] Current IM: $CURRENT"
+        
         # Verify if our input method is active
         if [ "$CURRENT" == "custom_input" ]; then
-             echo -e "\n[STATUS] Custom Input is ACTIVE!"
+             echo -e "\n[STATUS] Q9 is ACTIVE!"
         elif [ "$CURRENT" == "keyboard-us" ]; then
-             # Don't spam too much
-             sleep 1
+             # Try to force toggle again?
+             # fcitx5-remote -s custom_input
+             :
         fi
         sleep 2
     done

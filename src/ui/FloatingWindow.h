@@ -3,7 +3,7 @@
 #include "../ConfigLoader.h"
 #include "CustomButton.h"
 #include <QWidget>
-#include <memory>
+#include <iostream>
 #include <vector>
 
 class FloatingWindow : public QWidget {
@@ -23,6 +23,8 @@ protected:
   void mousePressEvent(QMouseEvent *event) override;
   void mouseMoveEvent(QMouseEvent *event) override;
   void resizeEvent(QResizeEvent *event) override;
+  void showEvent(QShowEvent *event) override;
+  void hideEvent(QHideEvent *event) override;
 
 private:
   AppConfig m_baseConfig;
@@ -30,4 +32,5 @@ private:
   QPoint m_dragPosition;
 
   void updateLayout();
+  void setupLayerShell();
 };

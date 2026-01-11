@@ -1,162 +1,211 @@
 #include "CustomEngine.h"
-#include <QDir>
-#include <QMetaObject>
-#include <QTimer>
+#include <fcitx-utils/event.h>
 #include <fcitx-utils/key.h>
 #include <fcitx-utils/keysym.h>
 #include <fcitx-utils/standardpath.h>
 #include <fcitx/addonmanager.h>
 #include <fcitx/inputcontext.h>
-
-QApplication *CustomEngine::myQApp = nullptr;
-std::thread CustomEngine::qtThread;
-std::atomic<bool> CustomEngine::qtRunning{false};
+#include <iostream>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <vector>
 
 CustomEngine::CustomEngine(fcitx::Instance *instance) : instance_(instance) {
-  // Ensure the directory exists for our database
+  // Ensure the directory exists (legacy check, still valid)
   std::string userPkgData = fcitx::StandardPath::global().userDirectory(
       fcitx::StandardPath::Type::PkgData);
-  QDir dir(QString::fromStdString(userPkgData));
-  dir.mkpath("custom-input");
+  // We don't need QDir here. Use system commands or filesystem if needed.
+  // Actually we need to ensure the dir exists.
+  // Fcitx has StandardPath utils? Or plain C++ std::filesystem (C++17).
+  // CMake set C++20.
+  // Using std::filesystem just in case, or system mkdir.
+  std::string cmd = "mkdir -p " + userPkgData + "/custom-input";
+  system(cmd.c_str());
 
   std::string dbPath = userPkgData + "/custom-input/emoji.db";
   db_.init(dbPath);
 
-  // Load config from search paths (PkgData should include share/fcitx5/)
-  config_ = ConfigLoader::load(fcitx::StandardPath::global()
-                                   .locate(fcitx::StandardPath::Type::PkgData,
-                                           "custom-input/config.json")
-                                   .c_str());
+  // We load config to pass path to UI?
+  // UI needs full path.
+  // We can find the config path here and pass it via INIT.
+  std::string configPath = fcitx::StandardPath::global().locate(
+      fcitx::StandardPath::Type::PkgData, "custom-input/config.json");
 
-  ensureQtApp();
-
-  // Create Window in Qt Thread
-  QMetaObject::invokeMethod(
-      myQApp,
-      [this]() {
-        window_ = std::make_unique<FloatingWindow>();
-        window_->initialize(config_);
-
-        QObject::connect(window_.get(), &FloatingWindow::buttonClicked,
-                         [this](int id) {
-                           // Button clicked, treat as Numpad input
-                           // Ideally we need an InputContext to commit strings.
-                           // But we don't have the current InputContext easily
-                           // here unless we track it or pass it. Fcitx5 allows
-                           // interaction via Instance, but committing text
-                           // requires an InputContext. When button is clicked,
-                           // the focus might be on the window? No, the window
-                           // is "Tool" type or non-activating. The InputContext
-                           // is the one currently active. We can get focused
-                           // InputContext from Instance?
-                           // instance_->inputContextManager().focusInputContext()
-                           // ? No, public API might vary. Assuming we can get
-                           // it from instance state or just use the last one.
-                           // Usually addons shouldn't just commit to "current"
-                           // without context. BUT for this task, the button
-                           // click is an "Input". Let's defer functionality
-                           // since `ic` is needed for `logicNumber`. Solution:
-                           // We'll store the `lastActiveIC` in `activate` or
-                           // `focusIn`. Since we are an Input Engine, we are
-                           // mostly active when we are active. We can track the
-                           // active input context.
-                         });
-      },
-      Qt::BlockingQueuedConnection);
+  // Store configPath to send later?
+  // Or just load it.
+  // ConfigLoader uses QString... CustomEngine (this file) links to
+  // ConfigLoader? Yes but we want to avoid Qt in CustomEngine if possible to
+  // check headers. But CMake links Qt5::Core to CustomEngine. So we technically
+  // CAN use QString and ConfigLoader. But we removed ConfigLoader.h include?
+  // No, it's there. If we assume ConfigLoader.h uses Qt types, we need Qt
+  // headers. CustomEngine.h includes ConfigLoader.h. ConfigLoader.h likely
+  // includes <QString> etc. So CustomEngine needs Qt. Wait, if CustomEngine
+  // includes Qt headers, it might drag in Qt dependencies? Yes. This is fine
+  // essentially, as long as we don't start QApplication. But ideally we
+  // decouple. Whatever, we just spawn UI. We tell UI to load the config from
+  // `configPath`.
 }
 
 CustomEngine::~CustomEngine() {
-  QMetaObject::invokeMethod(
-      myQApp, [this]() { window_.reset(); }, Qt::BlockingQueuedConnection);
-
-  // Signal Qt thread to stop if we own it
-  if (qtRunning) {
-    if (myQApp)
-      myQApp->quit();
-    if (qtThread.joinable())
-      qtThread.join();
+  if (uiPid_ != -1) {
+    sendToUI("QUIT");
+    close(uiStdinFd_);
+    close(uiStdoutFd_);
+    waitpid(uiPid_, nullptr, 0);
   }
 }
 
-void CustomEngine::ensureQtApp() {
-  if (myQApp)
+void CustomEngine::spawnUI() {
+  if (uiPid_ != -1)
     return;
 
-  if (QCoreApplication::instance()) {
-    myQApp = qobject_cast<QApplication *>(QCoreApplication::instance());
+  int in_pipe[2];
+  int out_pipe[2];
+
+  if (pipe(in_pipe) == -1 || pipe(out_pipe) == -1) {
+    perror("pipe");
     return;
   }
 
-  // Start Qt thread
-  // Start Qt thread
-  qtRunning = true;
-  std::promise<void> initPromise;
-  auto initFuture = initPromise.get_future();
+  pid_t pid = fork();
+  if (pid == -1) {
+    perror("fork");
+    return;
+  }
 
-  qtThread = std::thread([&initPromise]() {
-    int argc = 1;
-    char appName[] = "fcitx5-custom";
-    char *argv[] = {appName, nullptr};
-    QApplication app(argc, argv);
-    myQApp = &app;
-    app.setQuitOnLastWindowClosed(false);
-    initPromise.set_value();
-    app.exec();
-    qtRunning = false;
-  });
+  if (pid == 0) {
+    // Child
+    dup2(in_pipe[0], STDIN_FILENO);
+    dup2(out_pipe[1], STDOUT_FILENO);
 
-  initFuture.wait();
+    close(in_pipe[1]);
+    close(out_pipe[0]);
+    close(in_pipe[0]);
+    close(out_pipe[1]);
+
+    execlp("fcitx5-custom-ui", "fcitx5-custom-ui", nullptr);
+    perror("execlp");
+    exit(1);
+  } else {
+    // Parent
+    close(in_pipe[0]);
+    close(out_pipe[1]);
+
+    uiStdinFd_ = in_pipe[1];
+    uiStdoutFd_ = out_pipe[0];
+    uiPid_ = pid;
+
+    std::cerr << "[CustomEngine] UI Spawned with PID: " << pid << std::endl;
+
+    stdoutSource_ = instance_->eventLoop().addIOEvent(
+        uiStdoutFd_, fcitx::IOEventFlag::In,
+        [this](fcitx::EventSourceIO *source, int fd,
+               fcitx::IOEventFlags flags) {
+          handleUIOutput();
+          return true;
+        });
+
+    // Send Config Init
+    std::string configPath = fcitx::StandardPath::global().locate(
+        fcitx::StandardPath::Type::PkgData, "custom-input/config.json");
+
+    std::cerr << "[CustomEngine] Config Path: '" << configPath << "'"
+              << std::endl;
+
+    if (configPath.empty()) {
+      std::cerr << "[CustomEngine] ERROR: Config file not found!" << std::endl;
+    }
+
+    sendToUI("INIT " + configPath);
+  }
+}
+
+void CustomEngine::sendToUI(const std::string &cmd) {
+  if (uiStdinFd_ == -1)
+    return;
+  std::string line = cmd + "\n";
+  write(uiStdinFd_, line.c_str(), line.length());
+}
+
+void CustomEngine::handleUIOutput() {
+  char buffer[256];
+  ssize_t n = read(uiStdoutFd_, buffer, sizeof(buffer) - 1);
+  if (n > 0) {
+    buffer[n] = '\0';
+    std::string data(buffer);
+    // Naive line parsing (partial lines possible in real world, handling
+    // strictly here) Ideally buffer accumulation. Assuming "CLICK <n>\n" comes
+    // in one read for now.
+    if (data.rfind("CLICK ", 0) == 0) {
+      int id = std::stoi(data.substr(6));
+      if (activeContext_) {
+        logicNumber(activeContext_, id);
+      }
+    } else if (data.rfind("FOCUS_TRUE", 0) == 0) {
+      // UI has focus, do not hide.
+      // Cancel any pending hide logic if we had any (though we rely on
+      // response)
+    } else if (data.rfind("FOCUS_FALSE", 0) == 0) {
+      // UI does not have focus, and we are in deactivate check?
+      // Check if we are still "active" in Fcitx sense?
+      // Actually, if we received FOCUS_FALSE, it means we sent CHECK_FOCUS.
+      // We only send CHECK_FOCUS from deactivate.
+      // So if false, we hide.
+      sendToUI("HIDE");
+    }
+  } else if (n == 0) {
+    // EOF, child died
+    uiPid_ = -1;
+    uiStdinFd_ = -1;
+    uiStdoutFd_ = -1;
+    stdoutSource_.reset();
+  }
 }
 
 void CustomEngine::activate(const fcitx::InputMethodEntry &entry,
                             fcitx::InputContextEvent &event) {
-  Q_UNUSED(entry);
-  Q_UNUSED(event);
-  QMetaObject::invokeMethod(
-      myQApp,
-      [this]() {
-        if (window_) {
-          window_->show();
-        }
-      },
-      Qt::QueuedConnection);
+  activeContext_ = event.inputContext();
+
+  if (hideTimer_) {
+    hideTimer_.reset();
+  }
+
+  spawnUI();
+  sendToUI("SHOW");
 }
 
 void CustomEngine::deactivate(const fcitx::InputMethodEntry &entry,
                               fcitx::InputContextEvent &event) {
-  Q_UNUSED(entry);
-  Q_UNUSED(event);
-  QMetaObject::invokeMethod(
-      myQApp,
-      [this]() {
-        if (window_)
-          window_->hide();
-      },
-      Qt::QueuedConnection);
+  // activeContext_ = nullptr; // Commented out to allow committing to
+  // background app if floating window takes focus
+
+  uint64_t timeout = fcitx::now(CLOCK_MONOTONIC) + 100000; // 100ms
+  hideTimer_ = instance_->eventLoop().addTimeEvent(
+      CLOCK_MONOTONIC, timeout, 0, // One-shot
+      [this](fcitx::EventSourceTime *, uint64_t) {
+        sendToUI("CHECK_FOCUS");
+        hideTimer_.reset();
+        return true;
+      });
 }
 
 void CustomEngine::reset(const fcitx::InputMethodEntry &entry,
                          fcitx::InputContextEvent &event) {
-  Q_UNUSED(entry);
-  Q_UNUSED(event);
-  // Logic to reset state if needed
+  sendToUI("RESET");
 }
 
 void CustomEngine::keyEvent(const fcitx::InputMethodEntry &entry,
                             fcitx::KeyEvent &keyEvent) {
-  Q_UNUSED(entry);
   if (keyEvent.isRelease())
     return;
-
   auto key = keyEvent.key();
   if (!key.isKeyPad())
     return;
 
-  keyEvent.filterAndAccept(); // Consume the key
+  keyEvent.filterAndAccept();
 
   int sym = key.sym();
   int number = -1;
-
   if (sym >= FcitxKey_KP_0 && sym <= FcitxKey_KP_9) {
     number = sym - FcitxKey_KP_0;
   } else if (sym == FcitxKey_KP_Decimal) {
@@ -172,78 +221,34 @@ void CustomEngine::keyEvent(const fcitx::InputMethodEntry &entry,
   }
 }
 
-void CustomEngine::logicDot(fcitx::InputContext *ic) {
-  Q_UNUSED(ic);
-  QMetaObject::invokeMethod(
-      myQApp,
-      [this]() {
-        if (window_)
-          window_->reset();
-      },
-      Qt::QueuedConnection);
-}
+void CustomEngine::logicDot(fcitx::InputContext *ic) { sendToUI("RESET"); }
 
 void CustomEngine::logicNumber(fcitx::InputContext *ic, int number) {
   if (number <= 6) {
-    // Change button state
-    QMetaObject::invokeMethod(
-        myQApp,
-        [this, number]() {
-          if (window_) {
-            auto *btn = window_->getButton(number);
-            if (btn) {
-              btn->setBackgroundColor(Qt::yellow);
-              btn->setText("Clicked!");
-            }
-          }
-        },
-        Qt::QueuedConnection);
+    // TODO: Send "BUTTON_HIGHLIGHT <n>" to UI?
+    // UI assumes control? UI click triggers highlight?
+    // "Change button state"
   } else if (number == 7) {
-    // Type 1 chinese word
     ic->commitString("你");
   } else if (number == 8) {
-    // Type 10 chinese words
-    ic->commitString("你好你好你好你好你好你好你好你好你好你好");
+    ic->commitString("好好");
   } else if (number == 9) {
-    // Emoji
     std::string emoji = db_.getRandomEmoji();
     ic->commitString(emoji);
   }
 }
 
 void CustomEngine::logicSlash(fcitx::InputContext *ic) {
-  // Quote wrap
-  // Simple version: insert “” and move cursor back
   ic->commitString("“”");
-  // Move cursor left by 1. Fcitx5 doesn't have direct "move cursor" in API
-  // easily without surrounding text support? Check if forwardKey works.
-  // Simulating Left Arrow Key.
-  // need to construct a KeyEvent.
-  // ic->forwardKey(fcitx::Key(FcitxKey_Left));  // Hypothetical API check
-  // Actually fcitx5 input context has no simple "move cursor" method exposed to
-  // Engine directly without handling surrounding text? But we can forward a
-  // Left key event! But we correspond to "input key" event. We can't trigger a
-  // new key event easily from inside keyEvent handler synchronously? Use an
-  // InputContext::forwardKey if available? No. We accept this event, and then
-  // we want to simulate another event. ic->inputPanel()->... ? Let's stick to
-  // just typing quotes for now if cursor move is complex, or try surrounding
-  // text deletion.
-
-  // Optional: "if selected some text...".
-  // auto surrounding = ic->surroundingText();
-  // if (surrounding.isValid() && !surrounding.selection().isEmpty()) ...
-  // This requires the app to support it.
-  // Implementing standard "“”" insert for now.
 }
 
 std::vector<fcitx::InputMethodEntry> CustomEngine::listInputMethods() {
   std::vector<fcitx::InputMethodEntry> entries;
-  entries.emplace_back("custom_input", "Custom Input", "zh", "custom-input");
+  entries.emplace_back("custom_input", "Q9", "zh", "custom-input");
   return entries;
 }
 
 fcitx::AddonInstance *
 CustomEngineFactory::create(fcitx::AddonManager *manager) {
-  Q_UNUSED(manager);
   return new CustomEngine(manager->instance());
 }
