@@ -318,21 +318,13 @@ void FloatingWindow::mouseReleaseEvent(QMouseEvent *event) {
 }
 
 int FloatingWindow::getResizeEdge(const QPoint &pos) const {
-  int edge = None;
-
-  if (pos.x() <= RESIZE_MARGIN) {
-    edge |= Left;
-  } else if (pos.x() >= width() - RESIZE_MARGIN) {
-    edge |= Right;
+  // Only allow resize from bottom-right corner
+  if (pos.x() >= width() - RESIZE_MARGIN &&
+      pos.y() >= height() - RESIZE_MARGIN) {
+    return Bottom | Right;
   }
 
-  if (pos.y() <= RESIZE_MARGIN) {
-    edge |= Top;
-  } else if (pos.y() >= height() - RESIZE_MARGIN) {
-    edge |= Bottom;
-  }
-
-  return edge;
+  return None;
 }
 
 void FloatingWindow::updateCursor(int edge) {
