@@ -42,6 +42,18 @@ AppConfig ConfigLoader::load(const QString &path) {
     config.buttons.push_back(btnConf);
   }
 
+  // Load key mappings (numpad mode)
+  QJsonObject keyObj = root["key"].toObject();
+  for (auto it = keyObj.begin(); it != keyObj.end(); ++it) {
+    config.keys[it.key()] = it.value().toInt();
+  }
+
+  // Load altkey mappings (non-numpad mode)
+  QJsonObject altKeyObj = root["altkey"].toObject();
+  for (auto it = altKeyObj.begin(); it != altKeyObj.end(); ++it) {
+    config.altKeys[it.key()] = it.value().toInt();
+  }
+
   return config;
 }
 

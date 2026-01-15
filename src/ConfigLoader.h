@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QMap>
 #include <QRect>
 #include <QString>
 #include <vector>
@@ -28,6 +29,13 @@ struct AppConfig {
     QRect rect;
   };
   std::vector<ButtonConfig> buttons;
+
+  // Key mappings (from config.json "key" section) - used with numpad
+  QMap<QString, int> keys;
+
+  // Alternative key mappings (from config.json "altkey" section) - used when
+  // use_numpad=false
+  QMap<QString, int> altKeys;
 
   QString configPath; // Store path for saving
 };

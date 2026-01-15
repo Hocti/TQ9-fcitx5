@@ -8,6 +8,7 @@
 #include <fcitx/inputmethodengine.h>
 #include <fcitx/instance.h>
 #include <memory>
+#include <unordered_map>
 #include <vector>
 
 class CustomEngine : public fcitx::InputMethodEngineV2 {
@@ -36,6 +37,11 @@ private:
 
   // Logic
   Q9Logic logic_;
+
+  // Config - loaded from UI on INIT response
+  bool use_numpad_ = true;
+  std::unordered_map<int, int> altKeyToNum_;   // Maps key code -> num (0-9)
+  std::unordered_map<int, Q9Key> altKeyToCmd_; // Maps key code -> command
 
   // UI Process Management
   pid_t uiPid_ = -1;

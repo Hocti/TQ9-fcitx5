@@ -14,36 +14,69 @@ CustomEngine::CustomEngine(fcitx::Instance *instance) : instance_(instance) {
   // Ensure the directory exists (legacy check, still valid)
   std::string userPkgData = fcitx::StandardPath::global().userDirectory(
       fcitx::StandardPath::Type::PkgData);
-  // We don't need QDir here. Use system commands or filesystem if needed.
-  // Actually we need to ensure the dir exists.
-  // Fcitx has StandardPath utils? Or plain C++ std::filesystem (C++17).
-  // CMake set C++20.
-  // Using std::filesystem just in case, or system mkdir.
   std::string cmd = "mkdir -p " + userPkgData + "/custom-input";
   system(cmd.c_str());
 
-  std::string dbPath = userPkgData + "/custom-input/emoji.db";
-  db_.init(dbPath);
+  std::string dbPath = userPkgData + "/custom-input/dataset.db";
 
-  // We load config to pass path to UI?
-  // UI needs full path.
-  // We can find the config path here and pass it via INIT.
+  // init logic
+  if (!logic_.init(dbPath)) {
+    std::cerr << "Logic DB Init Failed: " << dbPath << std::endl;
+  }
+
+  // Load config for key mappings
   std::string configPath = fcitx::StandardPath::global().locate(
       fcitx::StandardPath::Type::PkgData, "custom-input/config.json");
 
-  // Store configPath to send later?
-  // Or just load it.
-  // ConfigLoader uses QString... CustomEngine (this file) links to
-  // ConfigLoader? Yes but we want to avoid Qt in CustomEngine if possible to
-  // check headers. But CMake links Qt5::Core to CustomEngine. So we technically
-  // CAN use QString and ConfigLoader. But we removed ConfigLoader.h include?
-  // No, it's there. If we assume ConfigLoader.h uses Qt types, we need Qt
-  // headers. CustomEngine.h includes ConfigLoader.h. ConfigLoader.h likely
-  // includes <QString> etc. So CustomEngine needs Qt. Wait, if CustomEngine
-  // includes Qt headers, it might drag in Qt dependencies? Yes. This is fine
-  // essentially, as long as we don't start QApplication. But ideally we
-  // decouple. Whatever, we just spawn UI. We tell UI to load the config from
-  // `configPath`.
+  if (!configPath.empty()) {
+    AppConfig config = ConfigLoader::load(QString::fromStdString(configPath));
+    use_numpad_ = config.use_numpad;
+
+    // Build altkey -> num mapping (for num0~num9)
+    // Config stores Windows VK codes (uppercase ASCII for letters: A=65, X=88,
+    // etc) Fcitx/X11 uses keysyms where lowercase a=97, x=120, etc We need to
+    // convert: VK code -> lowercase letter keysym
+    for (int i = 0; i <= 9; ++i) {
+      QString keyName = QString("num%1").arg(i);
+      if (config.altKeys.contains(keyName)) {
+        int vkCode = config.altKeys[keyName];
+        // Convert uppercase VK code (A=65..Z=90) to lowercase keysym
+        // (a=97..z=122)
+        int keysym = (vkCode >= 65 && vkCode <= 90) ? (vkCode + 32) : vkCode;
+        altKeyToNum_[keysym] = i;
+        std::cerr << "[CustomEngine] altKey num" << i << " = " << vkCode
+                  << " -> keysym " << keysym << std::endl;
+      }
+    }
+
+    // Build altkey -> command mapping
+    auto addCmd = [&](const QString &name, Q9Key cmd) {
+      if (config.altKeys.contains(name)) {
+        int vkCode = config.altKeys[name];
+        int keysym = (vkCode >= 65 && vkCode <= 90) ? (vkCode + 32) : vkCode;
+        altKeyToCmd_[keysym] = cmd;
+        std::cerr << "[CustomEngine] altKey " << name.toStdString() << " = "
+                  << vkCode << " -> keysym " << keysym << std::endl;
+      }
+    };
+
+    addCmd("cancel", Q9Key::Cancel);
+    addCmd("relate", Q9Key::Relate);
+    addCmd("homo", Q9Key::Homo);
+    addCmd("openclose", Q9Key::OpenClose);
+    // prev and shortcut share same key, handled based on candidateMode
+    if (config.altKeys.contains("prev")) {
+      int vkCode = config.altKeys["prev"];
+      int keysym = (vkCode >= 65 && vkCode <= 90) ? (vkCode + 32) : vkCode;
+      // Store as Shortcut - we'll check candidateMode at runtime
+      altKeyToCmd_[keysym] =
+          Q9Key::Shortcut; // Treated as shortcut, but also prev
+      std::cerr << "[CustomEngine] altKey prev/shortcut = " << vkCode
+                << " -> keysym " << keysym << std::endl;
+    }
+
+    std::cerr << "[CustomEngine] use_numpad=" << use_numpad_ << std::endl;
+  }
 }
 
 CustomEngine::~CustomEngine() {
@@ -139,7 +172,26 @@ void CustomEngine::handleUIOutput() {
     if (data.rfind("CLICK ", 0) == 0) {
       int id = std::stoi(data.substr(6));
       if (activeContext_) {
-        logicNumber(activeContext_, id);
+        bool changed = false;
+        if (id <= 9) {
+          changed = logic_.processKey(id);
+        } else if (id == 10) {
+          changed = logic_.processCommand(Q9Key::Cancel);
+        } else if (id == 0) {
+          // Button 0 -> Page Down in Candidate Mode?
+          // Logic handles 0 as NextPage or similar if mapped?
+          changed = logic_.processKey(0);
+        }
+
+        if (logic_.hasCommitString()) {
+          activeContext_->commitString(logic_.getCommitString());
+          logic_.clearCommitString();
+          changed = true;
+        }
+
+        if (changed) {
+          updateUIState();
+        }
       }
     } else if (data.rfind("FOCUS_TRUE", 0) == 0) {
       // UI has focus, do not hide.
@@ -192,6 +244,8 @@ void CustomEngine::deactivate(const fcitx::InputMethodEntry &entry,
 void CustomEngine::reset(const fcitx::InputMethodEntry &entry,
                          fcitx::InputContextEvent &event) {
   sendToUI("RESET");
+  logic_.reset();
+  updateUIState();
 }
 
 void CustomEngine::keyEvent(const fcitx::InputMethodEntry &entry,
@@ -199,49 +253,180 @@ void CustomEngine::keyEvent(const fcitx::InputMethodEntry &entry,
   if (keyEvent.isRelease())
     return;
   auto key = keyEvent.key();
-  if (!key.isKeyPad())
-    return;
 
-  keyEvent.filterAndAccept();
-
+  bool handled = false;
+  bool changed = false;
   int sym = key.sym();
-  int number = -1;
-  if (sym >= FcitxKey_KP_0 && sym <= FcitxKey_KP_9) {
-    number = sym - FcitxKey_KP_0;
-  } else if (sym == FcitxKey_KP_Decimal) {
-    logicDot(keyEvent.inputContext());
-    return;
-  } else if (sym == FcitxKey_KP_Divide) {
-    logicSlash(keyEvent.inputContext());
-    return;
+
+  // When use_numpad is true, handle numpad keys
+  // When use_numpad is false, handle alt keys (regular letter keys)
+
+  if (use_numpad_) {
+    // Numpad mode - original behavior
+    if (key.isKeyPad()) {
+      // Numpad 0-9
+      if (sym >= FcitxKey_KP_0 && sym <= FcitxKey_KP_9) {
+        int num = sym - FcitxKey_KP_0;
+        changed = logic_.processKey(num);
+        handled = true;
+      }
+      // Numpad . (decimal) = Cancel
+      else if (sym == FcitxKey_KP_Decimal) {
+        changed = logic_.processCommand(Q9Key::Cancel);
+        handled = true;
+      }
+      // Numpad + = Relate
+      else if (sym == FcitxKey_KP_Add) {
+        changed = logic_.processCommand(Q9Key::Relate);
+        handled = true;
+      }
+      // Numpad - = Shortcut (when not in select mode) or PrevPage (in select
+      // mode)
+      else if (sym == FcitxKey_KP_Subtract) {
+        Q9State state = logic_.getState();
+        if (state.candidateMode) {
+          changed = logic_.processCommand(Q9Key::PrevPage);
+        } else {
+          changed = logic_.processCommand(Q9Key::Shortcut);
+        }
+        handled = true;
+      }
+      // Numpad * = Homo (toggle homophone mode)
+      else if (sym == FcitxKey_KP_Multiply) {
+        changed = logic_.processCommand(Q9Key::Homo);
+        handled = true;
+      }
+      // Numpad / = OpenClose (bracket pairs)
+      else if (sym == FcitxKey_KP_Divide) {
+        changed = logic_.processCommand(Q9Key::OpenClose);
+        handled = true;
+      }
+    }
+  } else {
+    // Alt key mode (non-numpad) - for keyboards without numpad
+    // Check for num0~num9 alt keys
+    auto numIt = altKeyToNum_.find(sym);
+    if (numIt != altKeyToNum_.end()) {
+      int num = numIt->second;
+      changed = logic_.processKey(num);
+      handled = true;
+    } else {
+      // Check for command alt keys
+      auto cmdIt = altKeyToCmd_.find(sym);
+      if (cmdIt != altKeyToCmd_.end()) {
+        Q9Key cmd = cmdIt->second;
+
+        // Special handling for shortcut/prev - same key, different behavior
+        if (cmd == Q9Key::Shortcut) {
+          Q9State state = logic_.getState();
+          if (state.candidateMode) {
+            changed = logic_.processCommand(Q9Key::PrevPage);
+          } else {
+            changed = logic_.processCommand(Q9Key::Shortcut);
+          }
+        } else {
+          changed = logic_.processCommand(cmd);
+        }
+        handled = true;
+      } else if (sym >= 'a' && sym <= 'z') {
+        // Block other letter keys when in non-numpad mode to prevent typing
+        // (mirroring C# behavior that returns true for keyCode >= 65 && keyCode
+        // <= 90)
+        handled = true;
+      }
+    }
   }
 
-  if (number != -1) {
-    logicNumber(keyEvent.inputContext(), number);
+  if (handled) {
+    keyEvent.filterAndAccept();
+
+    // Check for commit
+    if (logic_.hasCommitString()) {
+      std::string commitStr = logic_.getCommitString();
+
+      // Check if this is an openclose pair (2 chars) - need cursor positioning
+      Q9State state = logic_.getState();
+      // Simple check: if we just committed and came from openclose, handle
+      // cursor The openclose mode is reset after commit, so we check commit
+      // string length UTF-8 CJK pairs would be 6 bytes (2 x 3-byte chars)
+      if (commitStr.length() >= 4 && commitStr.length() <= 8) {
+        // Could be bracket pair - commit and move cursor left
+        keyEvent.inputContext()->commitString(commitStr);
+        // TODO: Send Left key to move cursor between brackets
+        // This requires additional Fcitx API or different approach
+      } else {
+        keyEvent.inputContext()->commitString(commitStr);
+      }
+      logic_.clearCommitString();
+      changed = true;
+    }
+
+    if (changed) {
+      updateUIState();
+    }
   }
 }
 
-void CustomEngine::logicDot(fcitx::InputContext *ic) { sendToUI("RESET"); }
+void CustomEngine::updateUIState() {
+  Q9State state = logic_.getState();
 
-void CustomEngine::logicNumber(fcitx::InputContext *ic, int number) {
-  if (number < 6) {
-    // TODO: Send "BUTTON_HIGHLIGHT <n>" to UI?
-    // UI assumes control? UI click triggers highlight?
-    // "Change button state"
-  } else if (number == 6) {
-    ic->commitString(std::to_string(number));
-  } else if (number == 7) {
-    ic->commitString("你");
-  } else if (number == 8) {
-    ic->commitString("好8好");
-  } else if (number == 9) {
-    std::string emoji = db_.getRandomEmoji();
-    ic->commitString(emoji);
+  if (state.candidateMode) {
+    // Candidate mode - show text on buttons 1-9
+    std::string cmd = "UPDATE_BUTTONS";
+    for (size_t i = 0; i < state.pageCandidates.size(); ++i) {
+      cmd += " " + std::to_string(i + 1) + ":" + state.pageCandidates[i] + "|";
+    }
+    // Clear remaining buttons
+    for (size_t i = state.pageCandidates.size(); i < 9; ++i) {
+      cmd += " " + std::to_string(i + 1) + ":|";
+    }
+
+    // Button 0: show "下頁" if multiple pages, else just "標點"
+    if (state.totalPages > 1) {
+      cmd += " 0:下頁|";
+    } else {
+      cmd += " 0:|";
+    }
+    cmd += "10:取消|";
+
+    sendToUI(cmd);
+
+    // Send status text with page info
+    if (state.totalPages > 1) {
+      std::string status = "SET_STATUS " + state.statusPrefix + " " +
+                           std::to_string(state.page + 1) + "/" +
+                           std::to_string(state.totalPages) + "頁";
+      sendToUI(status);
+    } else if (!state.statusPrefix.empty()) {
+      sendToUI("SET_STATUS " + state.statusPrefix);
+    }
+  } else if (!state.inputCode.empty()) {
+    // Input mode - show images based on input progress
+    std::string cmd = "SET_IMAGES " + std::to_string(state.imageType);
+    sendToUI(cmd);
+
+    // Update button 0 and 10 text
+    if (state.inputCode.length() >= 1) {
+      sendToUI("UPDATE_BUTTONS 0:姓氏|10:取消|");
+    }
+
+    // Show status
+    if (!state.statusPrefix.empty()) {
+      sendToUI("SET_STATUS 九万 " + state.statusPrefix);
+    }
+  } else if (!state.relatedWords.empty()) {
+    // Show related words with base images visible
+    std::string cmd = "SET_RELATED";
+    for (size_t i = 0; i < state.relatedWords.size() && i < 9; ++i) {
+      cmd += " " + std::to_string(i + 1) + ":" + state.relatedWords[i] + "|";
+    }
+    cmd += " 0:標點|10:取消|";
+    sendToUI(cmd);
+  } else {
+    // Base state - reset to images
+    sendToUI("RESET");
+    sendToUI("SET_STATUS 九万");
   }
-}
-
-void CustomEngine::logicSlash(fcitx::InputContext *ic) {
-  ic->commitString("“”");
 }
 
 std::vector<fcitx::InputMethodEntry> CustomEngine::listInputMethods() {

@@ -126,6 +126,7 @@ int main(int argc, char *argv[]) {
           window.reset();
           window.raise();
         } else if (line == "QUIT") {
+          window.saveConfig();
           window.hide();
           QApplication::quit();
         } else if (line.startsWith("INIT ")) {
@@ -151,6 +152,120 @@ int main(int argc, char *argv[]) {
         } else if (line == "CHECK_FOCUS") {
           bool active = window.isActiveWindow();
           std::cout << (active ? "FOCUS_TRUE" : "FOCUS_FALSE") << std::endl;
+        } else if (line.startsWith("UPDATE_BUTTONS")) {
+          QString content = line.mid(14).trimmed(); // UPDATE_BUTTONS (len 14)
+          if (!content.isEmpty()) {
+            QStringList items = content.split('|');
+            for (const QString &item : items) {
+              if (item.isEmpty())
+                continue;
+              int colIdx = item.indexOf(':');
+              if (colIdx != -1) {
+                bool ok;
+                int id = item.left(colIdx).trimmed().toInt(&ok);
+                if (ok) {
+                  QString text = item.mid(colIdx + 1);
+                  CustomButton *btn = window.getButton(id);
+                  if (btn) {
+                    btn->setText(text);
+                    btn->setImage(""); // Clear image for text display
+                    if (text.isEmpty()) {
+                      btn->setBackgroundColor(Qt::gray);
+                      btn->setDisabledState(true);
+                    } else {
+                      btn->setBackgroundColor(Qt::white);
+                      btn->setDisabledState(false);
+                    }
+                  }
+                }
+              }
+            }
+          }
+        } else if (line.startsWith("SET_IMAGES ")) {
+          // SET_IMAGES <type> - set button 1-9 images to type_1.png through
+          // type_9.png
+          QString content = line.mid(11).trimmed();
+          bool ok;
+          int imageType = content.toInt(&ok);
+          if (ok && imageType >= 0) {
+            QFileInfo configInfo(window.getConfigPath());
+            QString imgPath = configInfo.absolutePath() + "/img";
+
+            for (int i = 1; i <= 9; ++i) {
+              CustomButton *btn = window.getButton(i);
+              if (btn) {
+                QString imagePath =
+                    imgPath + QString("/%1_%2.png").arg(imageType).arg(i);
+                btn->setImage(imagePath);
+                btn->setText(chineseNumerals[i - 1]);
+                btn->setBackgroundColor(Qt::white);
+                btn->setDisabledState(false);
+              }
+            }
+          }
+        } else if (line.startsWith("SET_RELATED")) {
+          // SET_RELATED id:text|id:text... - show related words with images
+          // visible
+          QString content = line.mid(11).trimmed();
+          QFileInfo configInfo(window.getConfigPath());
+          QString imgPath = configInfo.absolutePath() + "/img";
+
+          // First reset images to base (type 10 shows through)
+          for (int i = 1; i <= 9; ++i) {
+            CustomButton *btn = window.getButton(i);
+            if (btn) {
+              QString imagePath = imgPath + QString("/10_%1.png").arg(i);
+              btn->setImage(imagePath);
+              btn->setBackgroundColor(Qt::white);
+            }
+          }
+
+          // Then overlay with related text
+          if (!content.isEmpty()) {
+            QStringList items = content.split('|');
+            for (const QString &item : items) {
+              if (item.isEmpty())
+                continue;
+              int colIdx = item.indexOf(':');
+              if (colIdx != -1) {
+                bool ok;
+                int id = item.left(colIdx).trimmed().toInt(&ok);
+                if (ok && id >= 1 && id <= 9) {
+                  QString text = item.mid(colIdx + 1);
+                  CustomButton *btn = window.getButton(id);
+                  if (btn) {
+                    // Show text over image - using small top-left alignment
+                    btn->setText(text);
+                  }
+                }
+              }
+            }
+          }
+
+          // Handle button 0 and 10 text
+          QStringList items = content.split('|');
+          for (const QString &item : items) {
+            if (item.isEmpty())
+              continue;
+            int colIdx = item.indexOf(':');
+            if (colIdx != -1) {
+              bool ok;
+              int id = item.left(colIdx).trimmed().toInt(&ok);
+              if (ok && (id == 0 || id == 10)) {
+                QString text = item.mid(colIdx + 1);
+                CustomButton *btn = window.getButton(id);
+                if (btn) {
+                  btn->setText(text);
+                  btn->setImage("");
+                  btn->setBackgroundColor(Qt::white);
+                }
+              }
+            }
+          }
+        } else if (line.startsWith("SET_STATUS ")) {
+          // SET_STATUS <text> - set window title
+          QString statusText = line.mid(11).trimmed();
+          window.setWindowTitle(statusText);
         }
       }
     } else if (n == 0) {
