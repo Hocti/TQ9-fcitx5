@@ -30,6 +30,11 @@ void CustomButton::setBackgroundColor(const QColor &color) {
   update();
 }
 
+void CustomButton::setRadius(int r) {
+  m_radius = r;
+  update();
+}
+
 void CustomButton::setOpacity(qreal opacity) {
   m_opacity = opacity;
   update();
@@ -55,7 +60,9 @@ void CustomButton::paintEvent(QPaintEvent *event) {
 
   // Draw Background
   if (m_bgColor.isValid()) {
-    painter.fillRect(rect(), m_bgColor);
+    painter.setBrush(m_bgColor);
+    painter.setPen(Qt::NoPen);
+    painter.drawRoundedRect(rect(), m_radius, m_radius);
   }
 
   // Draw Image (Top-Left, scaled to 50% of size approx)
@@ -92,8 +99,9 @@ void CustomButton::paintEvent(QPaintEvent *event) {
   }
 
   // Draw Border
+  painter.setBrush(Qt::NoBrush);
   painter.setPen(Qt::darkGray);
-  painter.drawRect(0, 0, width() - 1, height() - 1);
+  painter.drawRoundedRect(0, 0, width() - 1, height() - 1, m_radius, m_radius);
 }
 
 void CustomButton::mousePressEvent(QMouseEvent *event) {

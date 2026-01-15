@@ -8,6 +8,7 @@
 struct ButtonConfig {
   int id;
   QRect rect;
+  int radius = 0;
 };
 
 struct AppConfig {
@@ -27,6 +28,7 @@ struct AppConfig {
   struct ButtonConfig {
     int id;
     QRect rect;
+    int radius = 0;
   };
   std::vector<ButtonConfig> buttons;
 

@@ -13,6 +13,7 @@ public:
   void setText(const QString &text);
   void setImage(const QString &imagePath);
   void setBackgroundColor(const QColor &color);
+  void setRadius(int r);
   void setOpacity(qreal opacity);
   void setDisabledState(bool disabled); // Changes brightness/opacity
   void setSmallText(bool small);        // If true, text is smaller and in
@@ -33,6 +34,7 @@ private:
   QImage m_image;
   QColor m_bgColor;
   qreal m_opacity;
+  int m_radius = 0;
   bool m_disabled;
   bool m_smallText = true; // Default: text is small and in bottom-right
 };

@@ -39,6 +39,7 @@ AppConfig ConfigLoader::load(const QString &path) {
     btnConf.id = btnObj["id"].toInt();
     btnConf.rect = QRect(btnObj["x"].toInt(), btnObj["y"].toInt(),
                          btnObj["w"].toInt(), btnObj["h"].toInt());
+    btnConf.radius = btnObj["r"].toInt(0);
     config.buttons.push_back(btnConf);
   }
 

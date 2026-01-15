@@ -38,6 +38,7 @@ CONFIG_DIR="$INSTALL_DIR/config"
 mkdir -p "$CONFIG_DIR/fcitx5"
 
 # Setup XDG paths
+export XDG_DATA_HOME="$INSTALL_DIR/share"
 export XDG_DATA_DIRS="$SHARE_PATH:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
 export XDG_CONFIG_HOME="$CONFIG_DIR"
 export PATH="$INSTALL_DIR/bin:$PATH"

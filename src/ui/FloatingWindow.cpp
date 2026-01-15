@@ -97,6 +97,7 @@ void FloatingWindow::initialize(const AppConfig &config) {
     // initializeButtons()
     btn->setText("");
     btn->setBackgroundColor(Qt::white);
+    btn->setRadius(btnConf.radius);
     connect(btn, &CustomButton::clicked, this, &FloatingWindow::buttonClicked);
     m_buttons.push_back(btn);
   }
@@ -373,6 +374,8 @@ void FloatingWindow::updateLayout() {
       int w = conf.width() * scaleX;
       int h = conf.height() * scaleY;
       m_buttons[i]->setGeometry(x, y, w, h);
+      m_buttons[i]->setRadius(m_baseConfig.buttons[i].radius *
+                              (scaleX + scaleY) / 2.0);
     }
   }
 }
