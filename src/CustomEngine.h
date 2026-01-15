@@ -3,7 +3,7 @@
 #include "ConfigLoader.h"
 #include "Database.h"
 #include "Q9Logic.h"
-#include <fcitx-utils/eventloopinterface.h>
+#include <fcitx-utils/event.h>
 #include <fcitx/addonfactory.h>
 #include <fcitx/inputmethodengine.h>
 #include <fcitx/instance.h>

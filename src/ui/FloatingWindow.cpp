@@ -1,6 +1,7 @@
 #include "FloatingWindow.h"
 #include <QApplication>
 #include <QCursor>
+#include <QGuiApplication>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QTimer>
@@ -11,12 +12,34 @@
 #include <LayerShellQt/Window>
 #include <iostream>
 
+// Helper function to detect if running on Wayland
+static bool isWayland() {
+  static bool checked = false;
+  static bool wayland = false;
+  if (!checked) {
+    QString platform = QGuiApplication::platformName();
+    wayland = platform.toLower().contains("wayland");
+    checked = true;
+    std::cerr << "[FloatingWindow] Platform: " << platform.toStdString()
+              << " (Wayland=" << (wayland ? "true" : "false") << ")"
+              << std::endl;
+  }
+  return wayland;
+}
+
 FloatingWindow::FloatingWindow(QWidget *parent)
-    : QWidget(parent, Qt::FramelessWindowHint) {
+    : QWidget(parent,
+              Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::Tool) {
   setAttribute(Qt::WA_TranslucentBackground);
   setAttribute(Qt::WA_ShowWithoutActivating);
   setFocusPolicy(Qt::NoFocus);
   setMouseTracking(true); // Enable mouse tracking for hover cursor updates
+
+  // On X11, we need additional flags for proper overlay behavior
+  if (!isWayland()) {
+    // X11: ensure the window stays on top and is not affected by window manager
+    setAttribute(Qt::WA_X11NetWmWindowTypeUtility, true);
+  }
 
   setMinimumSize(100, 100);
   // Position at top-right corner initially
@@ -24,6 +47,15 @@ FloatingWindow::FloatingWindow(QWidget *parent)
 }
 
 void FloatingWindow::setupLayerShell() {
+  // Skip LayerShell setup on X11 - it's Wayland only
+  if (!isWayland()) {
+    std::cerr << "[FloatingWindow] X11 detected, skipping LayerShell setup"
+              << std::endl;
+    // On X11, just ensure the window is positioned correctly
+    move(m_windowPosition);
+    return;
+  }
+
   // Get the QWindow and configure LayerShellQt
   QWindow *win = windowHandle();
   if (!win) {
@@ -60,6 +92,15 @@ void FloatingWindow::setupLayerShell() {
 }
 
 void FloatingWindow::updateLayerShellPosition() {
+  // On X11, use standard Qt move() for positioning
+  if (!isWayland()) {
+    std::cerr << "[FloatingWindow] X11: move to: " << m_windowPosition.x()
+              << "," << m_windowPosition.y() << std::endl;
+    move(m_windowPosition);
+    return;
+  }
+
+  // Wayland path: use LayerShell margins for positioning
   QWindow *win = windowHandle();
   if (!win) {
     std::cerr << "[FloatingWindow] updateLayerShellPosition: no windowHandle"
@@ -69,18 +110,15 @@ void FloatingWindow::updateLayerShellPosition() {
 
   LayerShellQt::Window *layerWindow = LayerShellQt::Window::get(win);
   if (layerWindow) {
-    std::cerr << "[FloatingWindow] Setting margins: left="
+    std::cerr << "[FloatingWindow] Setting LayerShell margins: left="
               << m_windowPosition.x() << " top=" << m_windowPosition.y()
               << std::endl;
-    // Use left margin for X, top margin for Y
     layerWindow->setMargins(
         QMargins(m_windowPosition.x(), m_windowPosition.y(), 0, 0));
+    win->requestUpdate();
   } else {
-    std::cerr << "[FloatingWindow] updateLayerShellPosition: no layerWindow"
+    std::cerr << "[FloatingWindow] Warning: Could not get LayerShellQt::Window"
               << std::endl;
-  }
-  if (windowHandle()) {
-    windowHandle()->requestUpdate();
   }
 }
 
@@ -136,9 +174,10 @@ void FloatingWindow::showWindow() {
   // On Wayland with LayerShell, after hide() the native window surface becomes
   // invalid. We need to destroy and recreate it for the window to show
   // properly.
-  if (m_wasHidden) {
-    std::cerr << "[FloatingWindow] Recreating window surface after hide"
-              << std::endl;
+  if (m_wasHidden && isWayland()) {
+    std::cerr
+        << "[FloatingWindow] Wayland: Recreating window surface after hide"
+        << std::endl;
 
     // Destroy the old window handle - this invalidates the Wayland surface
     if (windowHandle()) {
@@ -153,11 +192,25 @@ void FloatingWindow::showWindow() {
     updateLayerShellPosition();
 
     m_wasHidden = false;
+  } else if (m_wasHidden && !isWayland()) {
+    // On X11, just reset the flag - no need to recreate window
+    std::cerr << "[FloatingWindow] X11: Showing window after hide" << std::endl;
+    m_wasHidden = false;
   }
 
   // Now show and raise the window
   show();
   raise();
+
+  // On X11, ensure window stays on top by raising it again after show
+  if (!isWayland()) {
+    // Use a timer to raise again after the window manager has processed the
+    // show
+    QTimer::singleShot(50, this, [this]() {
+      raise();
+      activateWindow();
+    });
+  }
 }
 
 void FloatingWindow::saveConfig() {
@@ -349,15 +402,23 @@ void FloatingWindow::resizeEvent(QResizeEvent *event) {
 void FloatingWindow::showEvent(QShowEvent *event) {
   QWidget::showEvent(event);
 
-  // Re-apply LayerShell configuration each time the window is shown
-  // On Wayland, the surface may be destroyed when hidden, so we need to
-  // reconfigure LayerShell properties
-  setupLayerShell();
-  updateLayerShellPosition();
+  if (isWayland()) {
+    // Re-apply LayerShell configuration each time the window is shown
+    // On Wayland, the surface may be destroyed when hidden, so we need to
+    // reconfigure LayerShell properties
+    setupLayerShell();
+    updateLayerShellPosition();
+    std::cerr << "[FloatingWindow] showEvent: LayerShell reconfigured"
+              << std::endl;
+  } else {
+    // On X11, ensure position is correct and window stays on top
+    move(m_windowPosition);
+    std::cerr << "[FloatingWindow] showEvent: X11 window shown at "
+              << m_windowPosition.x() << "," << m_windowPosition.y()
+              << std::endl;
+  }
 
   raise();
-  std::cerr << "[FloatingWindow] showEvent: LayerShell reconfigured"
-            << std::endl;
 }
 
 void FloatingWindow::hideEvent(QHideEvent *event) {

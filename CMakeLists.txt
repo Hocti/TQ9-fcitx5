@@ -12,6 +12,8 @@ add_definitions(-DQT_NO_KEYWORDS)
 find_package(ECM REQUIRED 1.0.0)
 set(CMAKE_MODULE_PATH ${ECM_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
+# Prevent Qt5 and Qt6 from conflicting on versionless targets like Qt::Core
+set(QT_NO_CREATE_VERSIONLESS_TARGETS ON)
 
 find_package(Fcitx5Core REQUIRED)
 find_package(Qt5 COMPONENTS Core Concurrent REQUIRED)
