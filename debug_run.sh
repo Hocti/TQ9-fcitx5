@@ -24,7 +24,7 @@ fi
 
 # 2. Locate paths
 # Find where the lib was installed (lib, lib64, etc.)
-LIB_PATH=$(find "$INSTALL_DIR" -name "libcustom_input.so" | xargs dirname)
+LIB_PATH=$(find "$INSTALL_DIR" -name "libtq9.so" | xargs dirname)
 SHARE_PATH="$INSTALL_DIR/share"
 
 if [ -z "$LIB_PATH" ]; then
@@ -53,11 +53,11 @@ Name=Default
 # Layout
 Default Layout=us
 # Default Input Method
-DefaultIM=custom_input
+DefaultIM=tq9
 
 [Groups/0/Items/0]
 # Name
-Name=custom_input
+Name=tq9
 # Layout
 Layout=
 
@@ -126,19 +126,19 @@ TAIL_PID=$!
 
 # Monitor status in background
 (
-    # Try to switch to custom_input if not active
-    fcitx5-remote -s custom_input
+    # Try to switch to tq9_input if not active
+    fcitx5-remote -s tq9
     
     while kill -0 $FCITX_PID 2>/dev/null; do
         CURRENT=$(fcitx5-remote -n)
         echo "[MONITOR] Current IM: $CURRENT"
         
         # Verify if our input method is active
-        if [ "$CURRENT" == "custom_input" ]; then
+        if [ "$CURRENT" == "tq9" ]; then
              echo -e "\n[STATUS] Q9 is ACTIVE!"
         elif [ "$CURRENT" == "keyboard-us" ]; then
              # Try to force toggle again?
-             # fcitx5-remote -s custom_input
+             # fcitx5-remote -s tq9_input
              :
         fi
         sleep 2

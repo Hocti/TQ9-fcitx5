@@ -14,13 +14,13 @@ CustomEngine::CustomEngine(fcitx::Instance *instance) : instance_(instance) {
   // Ensure the directory exists (legacy check, still valid)
   std::string userPkgData = fcitx::StandardPath::global().userDirectory(
       fcitx::StandardPath::Type::PkgData);
-  std::string cmd = "mkdir -p " + userPkgData + "/custom-input";
+  std::string cmd = "mkdir -p " + userPkgData + "/tq9";
   system(cmd.c_str());
 
   // Load config for key mappings FIRST - we derive database path from config
   // location
   std::string configPath = fcitx::StandardPath::global().locate(
-      fcitx::StandardPath::Type::PkgData, "custom-input/config.json");
+      fcitx::StandardPath::Type::PkgData, "tq9/config.json");
 
   if (!configPath.empty()) {
     // Derive database path from config path (same directory)
@@ -125,7 +125,7 @@ void CustomEngine::spawnUI() {
     close(in_pipe[0]);
     close(out_pipe[1]);
 
-    execlp("fcitx5-custom-ui", "fcitx5-custom-ui", nullptr);
+    execlp("fcitx5-tq9-ui", "fcitx5-tq9-ui", nullptr);
     perror("execlp");
     exit(1);
   } else {
@@ -149,7 +149,7 @@ void CustomEngine::spawnUI() {
 
     // Send Config Init
     std::string configPath = fcitx::StandardPath::global().locate(
-        fcitx::StandardPath::Type::PkgData, "custom-input/config.json");
+        fcitx::StandardPath::Type::PkgData, "tq9/config.json");
 
     std::cerr << "[CustomEngine] Config Path: '" << configPath << "'"
               << std::endl;
@@ -469,7 +469,7 @@ void CustomEngine::updateUIState() {
 
 std::vector<fcitx::InputMethodEntry> CustomEngine::listInputMethods() {
   std::vector<fcitx::InputMethodEntry> entries;
-  entries.emplace_back("custom_input", "Q9", "zh", "custom-input");
+  entries.emplace_back("tq9", "TQ9", "zh_TW", "tq9");
   return entries;
 }
 

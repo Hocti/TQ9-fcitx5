@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(fcitx5-custom-input)
+project(fcitx5-tq9)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_AUTOMOC ON)
@@ -22,7 +22,7 @@ pkg_check_modules(SQLITE3 REQUIRED sqlite3)
 
 include_directories(${Fcitx5Core_INCLUDE_DIRS} ${SQLITE3_INCLUDE_DIRS})
 
-add_library(custom_input MODULE
+add_library(tq9 MODULE
     src/addon.cpp
     src/CustomEngine.cpp
     src/CustomEngine.h
@@ -33,7 +33,7 @@ add_library(custom_input MODULE
     src/ConfigLoader.h
 )
 
-target_link_libraries(custom_input
+target_link_libraries(tq9
     Fcitx5::Core
     Qt5::Core
     Qt5::Concurrent
@@ -41,7 +41,7 @@ target_link_libraries(custom_input
 )
 
 # UI executable uses Qt6 for LayerShellQt Wayland support
-add_executable(fcitx5-custom-ui
+add_executable(fcitx5-tq9-ui
     src/ui/main.cpp
     src/ui/FloatingWindow.cpp
     src/ui/FloatingWindow.h
@@ -51,7 +51,7 @@ add_executable(fcitx5-custom-ui
     src/ConfigLoader.h
 )
 
-target_link_libraries(fcitx5-custom-ui
+target_link_libraries(fcitx5-tq9-ui
     Qt6::Core
     Qt6::Widgets
     Qt6::Gui
@@ -59,13 +59,13 @@ target_link_libraries(fcitx5-custom-ui
     ${SQLITE3_LIBRARIES}
 )
 
-target_include_directories(fcitx5-custom-ui PRIVATE
+target_include_directories(fcitx5-tq9-ui PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 
-install(TARGETS custom_input DESTINATION "${CMAKE_INSTALL_LIBDIR}/fcitx5")
-install(TARGETS fcitx5-custom-ui DESTINATION "${CMAKE_INSTALL_BINDIR}")
-install(FILES data/custom-input.conf DESTINATION "${CMAKE_INSTALL_DATADIR}/fcitx5/addon")
-install(FILES data/config.json DESTINATION "${CMAKE_INSTALL_DATADIR}/fcitx5/custom-input")
-install(FILES data/dataset.db DESTINATION "${CMAKE_INSTALL_DATADIR}/fcitx5/custom-input")
-install(DIRECTORY data/img DESTINATION "${CMAKE_INSTALL_DATADIR}/fcitx5/custom-input")
+install(TARGETS tq9 DESTINATION "${CMAKE_INSTALL_LIBDIR}/fcitx5")
+install(TARGETS fcitx5-tq9-ui DESTINATION "${CMAKE_INSTALL_BINDIR}")
+install(FILES data/tq9.conf DESTINATION "${CMAKE_INSTALL_DATADIR}/fcitx5/addon")
+install(FILES data/config.json DESTINATION "${CMAKE_INSTALL_DATADIR}/fcitx5/tq9")
+install(FILES data/dataset.db DESTINATION "${CMAKE_INSTALL_DATADIR}/fcitx5/tq9")
+install(DIRECTORY data/img DESTINATION "${CMAKE_INSTALL_DATADIR}/fcitx5/tq9")

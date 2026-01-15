@@ -2,7 +2,7 @@
 
 # Configuration
 BUILD_DIR="build_release"
-PACKAGE_NAME="fcitx5-custom-input"
+PACKAGE_NAME="fcitx5-tq9"
 OUTPUT_DIR="release_output"
 PKG_ROOT="$BUILD_DIR/pkg_root"
 
