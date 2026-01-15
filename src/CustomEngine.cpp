@@ -475,7 +475,9 @@ void CustomEngine::updateUIState() {
 
 std::vector<fcitx::InputMethodEntry> CustomEngine::listInputMethods() {
   std::vector<fcitx::InputMethodEntry> entries;
-  entries.emplace_back("tq9", "TQ9", "zh_TW", "tq9");
+  auto &entry = entries.emplace_back("tq9", "TQ9", "zh_HK", "tq9");
+  // entry.setIcon("tq9");
+  entry.setLabel("HK");
   return entries;
 }
 
