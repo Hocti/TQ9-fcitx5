@@ -1,12 +1,13 @@
-#pragma once
+#ifndef CUSTOMBUTTON_H
+#define CUSTOMBUTTON_H
 
+#include <QColor>
 #include <QImage>
-#include <QLabel>
+#include <QString>
 #include <QWidget>
 
 class CustomButton : public QWidget {
   Q_OBJECT
-
 public:
   explicit CustomButton(int id, QWidget *parent = nullptr);
 
@@ -15,9 +16,7 @@ public:
   void setBackgroundColor(const QColor &color);
   void setRadius(int r);
   void setOpacity(qreal opacity);
-  void setDisabledState(bool disabled); // Changes brightness/opacity
-  void setSmallText(bool small);        // If true, text is smaller and in
-                                 // bottom-right; if false, larger and centered
+  void setDisabledState(bool disabled);
 
   int getId() const { return m_id; }
 
@@ -33,8 +32,9 @@ private:
   QString m_text;
   QImage m_image;
   QColor m_bgColor;
-  qreal m_opacity;
   int m_radius = 0;
-  bool m_disabled;
-  bool m_smallText = true; // Default: text is small and in bottom-right
+  qreal m_opacity = 1.0;
+  bool m_disabled = false;
 };
+
+#endif // CUSTOMBUTTON_H

@@ -45,11 +45,6 @@ void CustomButton::setDisabledState(bool disabled) {
   update();
 }
 
-void CustomButton::setSmallText(bool small) {
-  m_smallText = small;
-  update();
-}
-
 void CustomButton::paintEvent(QPaintEvent *event) {
   Q_UNUSED(event);
   QPainter painter(this);
@@ -65,34 +60,55 @@ void CustomButton::paintEvent(QPaintEvent *event) {
     painter.drawRoundedRect(rect(), m_radius, m_radius);
   }
 
-  // Draw Image (Top-Left, scaled to 50% of size approx)
-  if (!m_image.isNull()) {
-    QRect imgRect(0, 0, width() * 0.6, height() * 0.6);
-    painter.drawImage(imgRect, m_image);
+  // Draw Image
+  bool hasImage = !m_image.isNull();
+  bool hasText = !m_text.isEmpty();
+
+  if (hasImage) {
+    if (hasText) {
+      // Both: Image on top left
+      QRect imgRect(0, 0, width() * 0.5, height() * 0.5);
+      painter.drawImage(imgRect, m_image);
+    } else {
+      // Only image: Center
+      int imgSize = qMin(width(), height()) * 0.8;
+      QRect imgRect((width() - imgSize) / 2, (height() - imgSize) / 2, imgSize,
+                    imgSize);
+      painter.drawImage(imgRect, m_image);
+    }
   }
 
   // Draw Text
-  if (!m_text.isEmpty()) {
+  if (hasText) {
     painter.setPen(Qt::black);
     QFont font = painter.font();
 
-    // Calculate font size based on text length: 64 / text-length
-    int textLen = m_text.length();
-    int fontSize = (textLen > 0) ? (64 / textLen) : 64;
-    fontSize = qMax(8, fontSize); // Minimum font size
+    // Base font size: 80% of button height
+    int fontSize = height() * 0.7;
 
-    if (m_smallText) {
-      // Small text in bottom-right corner
-      font.setPixelSize(height() / 3);
+    if (m_text.length() > 1) {
+      // Reduce font size if more than one character
+      fontSize = height() * 0.5;
+      // Ensure it doesn't exceed width
+      QFont tempFont = font;
+      tempFont.setPixelSize(fontSize);
+      QFontMetrics fm(tempFont);
+      if (fm.horizontalAdvance(m_text) > width() * 0.9) {
+        fontSize = fontSize * (width() * 0.9) / fm.horizontalAdvance(m_text);
+      }
+    }
+
+    if (hasImage) {
+      // Both: Text on bottom right
+      // Use a smaller font for corner label (approx 40% of height)
+      int cornerFontSize = height() * 0.4;
+      font.setPixelSize(qMax(8, cornerFontSize));
       painter.setFont(font);
-      QRect textRect(width() * 0.2, height() * 0.4, width() * 0.8,
-                     height() * 0.6);
-      painter.drawText(textRect,
-                       Qt::AlignBottom | Qt::AlignRight | Qt::TextWordWrap,
-                       m_text);
+      painter.drawText(rect().adjusted(2, 2, -4, -4),
+                       Qt::AlignBottom | Qt::AlignRight, m_text);
     } else {
-      // Larger text centered in button
-      font.setPixelSize(fontSize);
+      // Only text: Center
+      font.setPixelSize(qMax(8, fontSize));
       painter.setFont(font);
       painter.drawText(rect(), Qt::AlignCenter | Qt::TextWordWrap, m_text);
     }

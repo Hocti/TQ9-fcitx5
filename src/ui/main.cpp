@@ -75,6 +75,7 @@ static void initializeButtons(FloatingWindow &window, const QString &basePath) {
       btn->setText(""); // No text in default state
       btn->setBackgroundColor(Qt::white);
       btn->setDisabledState(false);
+      btn->setOpacity(1);
     }
   }
 
@@ -85,6 +86,8 @@ static void initializeButtons(FloatingWindow &window, const QString &basePath) {
     btn0->setText("標點");
     btn0->setImage("");
     btn0->setBackgroundColor(Qt::white);
+    btn0->setDisabledState(false);
+    btn0->setOpacity(1);
   }
 
   CustomButton *btn10 = window.getButton(10);
@@ -186,6 +189,7 @@ int main(int argc, char *argv[]) {
                   if (btn) {
                     btn->setText(text);
                     btn->setImage(""); // Clear image for text display
+                    btn->setOpacity(1);
                     if (text.isEmpty()) {
                       btn->setBackgroundColor(Qt::gray);
                       btn->setDisabledState(true);
@@ -204,6 +208,11 @@ int main(int argc, char *argv[]) {
           QString content = line.mid(11).trimmed();
           bool ok;
           int imageType = content.toInt(&ok);
+          bool isTen = false;
+          if (ok && imageType == 10) {
+            isTen = true;
+            imageType = 0;
+          }
           if (ok && imageType >= 0) {
             QFileInfo configInfo(window.getConfigPath());
             QString imgPath = configInfo.absolutePath() + "/img";
@@ -217,6 +226,11 @@ int main(int argc, char *argv[]) {
                 btn->setText(""); // No text overlay during input mode
                 btn->setBackgroundColor(Qt::white);
                 btn->setDisabledState(false);
+                if (isTen) {
+                  btn->setOpacity(0.5);
+                } else {
+                  btn->setOpacity(1);
+                }
               }
             }
           }
@@ -234,6 +248,7 @@ int main(int argc, char *argv[]) {
               QString imagePath = imgPath + QString("/0_%1.png").arg(i);
               btn->setImage(imagePath);
               btn->setBackgroundColor(Qt::white);
+              btn->setOpacity(1);
             }
           }
 
