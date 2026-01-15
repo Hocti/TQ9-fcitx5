@@ -17,18 +17,27 @@ CustomEngine::CustomEngine(fcitx::Instance *instance) : instance_(instance) {
   std::string cmd = "mkdir -p " + userPkgData + "/custom-input";
   system(cmd.c_str());
 
-  std::string dbPath = userPkgData + "/custom-input/dataset.db";
-
-  // init logic
-  if (!logic_.init(dbPath)) {
-    std::cerr << "Logic DB Init Failed: " << dbPath << std::endl;
-  }
-
-  // Load config for key mappings
+  // Load config for key mappings FIRST - we derive database path from config
+  // location
   std::string configPath = fcitx::StandardPath::global().locate(
       fcitx::StandardPath::Type::PkgData, "custom-input/config.json");
 
   if (!configPath.empty()) {
+    // Derive database path from config path (same directory)
+    std::string dataDir = configPath.substr(0, configPath.rfind('/'));
+    std::string dbPath = dataDir + "/dataset.db";
+
+    std::cerr << "[CustomEngine] Config path: " << configPath << std::endl;
+    std::cerr << "[CustomEngine] Database path: " << dbPath << std::endl;
+
+    // init logic with correct database path
+    if (!logic_.init(dbPath)) {
+      std::cerr << "Logic DB Init Failed: " << dbPath << std::endl;
+    } else {
+      std::cerr << "[CustomEngine] Logic DB initialized successfully"
+                << std::endl;
+    }
+
     AppConfig config = ConfigLoader::load(QString::fromStdString(configPath));
     use_numpad_ = config.use_numpad;
 
@@ -243,9 +252,22 @@ void CustomEngine::deactivate(const fcitx::InputMethodEntry &entry,
 
 void CustomEngine::reset(const fcitx::InputMethodEntry &entry,
                          fcitx::InputContextEvent &event) {
-  sendToUI("RESET");
-  logic_.reset();
-  updateUIState();
+  Q9State state = logic_.getState();
+
+  // Only reset if there's actual input state (candidateMode or inputCode)
+  // Preserve the state if we're just showing related words after a commit
+  if (state.candidateMode || !state.inputCode.empty()) {
+    sendToUI("RESET");
+    logic_.reset();
+    updateUIState();
+  } else if (!state.relatedWords.empty()) {
+    // We have related words to show - don't reset, but update UI
+    std::cerr
+        << "[CustomEngine] reset() skipped - preserving relatedWords display"
+        << std::endl;
+    updateUIState();
+  }
+  // If nothing to reset, do nothing (already in base state)
 }
 
 void CustomEngine::keyEvent(const fcitx::InputMethodEntry &entry,
@@ -370,6 +392,12 @@ void CustomEngine::keyEvent(const fcitx::InputMethodEntry &entry,
 void CustomEngine::updateUIState() {
   Q9State state = logic_.getState();
 
+  std::cerr << "[CustomEngine] updateUIState: candidateMode="
+            << state.candidateMode << " inputCode='" << state.inputCode << "'"
+            << " relatedWords.size=" << state.relatedWords.size()
+            << " pageCandidates.size=" << state.pageCandidates.size()
+            << std::endl;
+
   if (state.candidateMode) {
     // Candidate mode - show text on buttons 1-9
     std::string cmd = "UPDATE_BUTTONS";
@@ -381,7 +409,7 @@ void CustomEngine::updateUIState() {
       cmd += " " + std::to_string(i + 1) + ":|";
     }
 
-    // Button 0: show "下頁" if multiple pages, else just "標點"
+    // Button 0: show "下頁" if multiple pages, else empty
     if (state.totalPages > 1) {
       cmd += " 0:下頁|";
     } else {
@@ -389,6 +417,7 @@ void CustomEngine::updateUIState() {
     }
     cmd += "10:取消|";
 
+    std::cerr << "[CustomEngine] Sending: " << cmd << std::endl;
     sendToUI(cmd);
 
     // Send status text with page info
@@ -400,9 +429,11 @@ void CustomEngine::updateUIState() {
     } else if (!state.statusPrefix.empty()) {
       sendToUI("SET_STATUS " + state.statusPrefix);
     }
+    lastUIStateWasBase_ = false;
   } else if (!state.inputCode.empty()) {
     // Input mode - show images based on input progress
     std::string cmd = "SET_IMAGES " + std::to_string(state.imageType);
+    std::cerr << "[CustomEngine] Sending: " << cmd << std::endl;
     sendToUI(cmd);
 
     // Update button 0 and 10 text
@@ -414,6 +445,7 @@ void CustomEngine::updateUIState() {
     if (!state.statusPrefix.empty()) {
       sendToUI("SET_STATUS 九万 " + state.statusPrefix);
     }
+    lastUIStateWasBase_ = false;
   } else if (!state.relatedWords.empty()) {
     // Show related words with base images visible
     std::string cmd = "SET_RELATED";
@@ -421,11 +453,17 @@ void CustomEngine::updateUIState() {
       cmd += " " + std::to_string(i + 1) + ":" + state.relatedWords[i] + "|";
     }
     cmd += " 0:標點|10:取消|";
+    std::cerr << "[CustomEngine] Sending: " << cmd << std::endl;
     sendToUI(cmd);
+    lastUIStateWasBase_ = false;
   } else {
-    // Base state - reset to images
-    sendToUI("RESET");
-    sendToUI("SET_STATUS 九万");
+    // Base state - reset to images (only if not already in base state)
+    if (!lastUIStateWasBase_) {
+      std::cerr << "[CustomEngine] Sending: RESET" << std::endl;
+      sendToUI("RESET");
+      sendToUI("SET_STATUS 九万");
+      lastUIStateWasBase_ = true;
+    }
   }
 }
 

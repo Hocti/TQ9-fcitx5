@@ -21,10 +21,6 @@ static QMap<QString, QImage> g_imageCache;
 // Global database handle
 static sqlite3 *g_db = nullptr;
 
-// Chinese numerals for buttons 1-9
-static const QString chineseNumerals[] = {"一", "二", "三", "四", "五",
-                                          "六", "七", "八", "九"};
-
 // Load all images from data/img directory
 static void loadAllImages(const QString &basePath) {
   QString imgPath = basePath + "/img";
@@ -65,25 +61,41 @@ static bool loadDatabase(const QString &basePath) {
   return true;
 }
 
-// Initialize buttons with images and Chinese text
+// Initialize buttons with default images (0_1.png~0_9.png) - matches C#
+// setButtonImg(0)
 static void initializeButtons(FloatingWindow &window, const QString &basePath) {
   QString imgPath = basePath + "/img";
 
-  // Set 10_1.png ~ 10_9.png on buttons 1-9 and set Chinese text
+  // Set 0_1.png ~ 0_9.png on buttons 1-9 with no text (default/reset state)
   for (int i = 1; i <= 9; ++i) {
     CustomButton *btn = window.getButton(i);
     if (btn) {
-      // Set image 10_x.png
-      QString imagePath = imgPath + QString("/10_%1.png").arg(i);
+      QString imagePath = imgPath + QString("/0_%1.png").arg(i);
       btn->setImage(imagePath);
-
-      // Set Chinese numeral text (一 to 九)
-      btn->setText(chineseNumerals[i - 1]);
-
-      std::cerr << "[UI] Button " << i << " initialized with image and text"
-                << std::endl;
+      btn->setText(""); // No text in default state
+      btn->setBackgroundColor(Qt::white);
+      btn->setDisabledState(false);
     }
   }
+
+  // Set button 0 to "標點" and button 10 to "取消" (matching C#
+  // setButtonImg(0))
+  CustomButton *btn0 = window.getButton(0);
+  if (btn0) {
+    btn0->setText("標點");
+    btn0->setImage("");
+    btn0->setBackgroundColor(Qt::white);
+  }
+
+  CustomButton *btn10 = window.getButton(10);
+  if (btn10) {
+    btn10->setText("取消");
+    btn10->setImage("");
+    btn10->setBackgroundColor(Qt::white);
+  }
+
+  std::cerr << "[UI] Buttons initialized with default images (0_*.png)"
+            << std::endl;
 }
 
 int main(int argc, char *argv[]) {
@@ -123,6 +135,11 @@ int main(int argc, char *argv[]) {
           std::cerr << "[UI] Hiding window" << std::endl;
           window.hide();
         } else if (line == "RESET") {
+          // Reset buttons to default state (0_*.png images, matching C#
+          // cancel()/setButtonImg(0))
+          QFileInfo configInfo(window.getConfigPath());
+          QString dataPath = configInfo.absolutePath();
+          initializeButtons(window, dataPath);
           window.reset();
           window.raise();
         } else if (line == "QUIT") {
@@ -197,7 +214,7 @@ int main(int argc, char *argv[]) {
                 QString imagePath =
                     imgPath + QString("/%1_%2.png").arg(imageType).arg(i);
                 btn->setImage(imagePath);
-                btn->setText(chineseNumerals[i - 1]);
+                btn->setText(""); // No text overlay during input mode
                 btn->setBackgroundColor(Qt::white);
                 btn->setDisabledState(false);
               }

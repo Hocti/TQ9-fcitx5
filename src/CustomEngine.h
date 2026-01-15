@@ -51,6 +51,9 @@ private:
   std::unique_ptr<fcitx::EventSource> hideTimer_;
 
   fcitx::InputContext *activeContext_ = nullptr;
+
+  // Track if UI is already in base state (to avoid repeated RESET)
+  bool lastUIStateWasBase_ = false;
 };
 
 class CustomEngineFactory : public fcitx::AddonFactory {

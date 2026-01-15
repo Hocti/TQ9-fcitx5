@@ -89,11 +89,14 @@ void FloatingWindow::initialize(const AppConfig &config) {
   m_windowPosition = QPoint(config.lastX, config.lastY);
   resize(config.windowWidth, config.windowHeight);
 
-  // Create buttons
+  // Create buttons (content will be set by pipe commands from engine)
   for (const auto &btnConf : config.buttons) {
     auto *btn = new CustomButton(btnConf.id, this);
     btn->setFocusPolicy(Qt::NoFocus);
-    btn->setText(QString::number(btnConf.id)); // Default text
+    // Don't set any default text - content controlled by main.cpp's
+    // initializeButtons()
+    btn->setText("");
+    btn->setBackgroundColor(Qt::white);
     connect(btn, &CustomButton::clicked, this, &FloatingWindow::buttonClicked);
     m_buttons.push_back(btn);
   }
@@ -112,12 +115,10 @@ CustomButton *FloatingWindow::getButton(int id) {
 }
 
 void FloatingWindow::reset() {
-  for (auto *btn : m_buttons) {
-    btn->setText(QString::number(btn->getId()));
-    btn->setBackgroundColor(Qt::lightGray);
-    btn->setImage("");
-    btn->setDisabledState(false);
-  }
+  // reset() is called when the engine sends RESET command
+  // The actual button content reset is handled in main.cpp via
+  // initializeButtons() Here we just ensure the window is in a clean state for
+  // redraw
   update();
 }
 
