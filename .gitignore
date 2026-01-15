@@ -1,12 +1,35 @@
-# Qt
-build
-build_debug
-build_release
+# Build directories
+build/
+build*/
+install_debug/
+install_release/
+release_output/
+
+# Compiled files
 *.o
-install_debug
-install_release
-release_output
+*.a
+*.so
 *.log
-.cache
+
+# Project/IDE specific
+.cache/
 compile_commands.json
+.vscode/
+.idea/
+*.user
+*.user.*
+CMakeCache.txt
+CMakeFiles/
+CMakeUserPresets.json
+cmake_install.cmake
+Makefile
+install_manifest.txt
+.ninja_deps
+.ninja_log
+
+# Data and OS
 data/dataset.db
+.DS_Store
+Thumbs.db
+*.swp
+*~

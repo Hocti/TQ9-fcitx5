@@ -27,82 +27,33 @@ bool Database::init(const std::string &dbPath) {
     return false;
   }
 
-  // Verify table exists
-  sqlite3_stmt *stmt;
-  if (sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM mapped_table", -1, &stmt,
-                         0) == SQLITE_OK) {
-    if (sqlite3_step(stmt) == SQLITE_ROW) {
-      int count = sqlite3_column_int(stmt, 0);
-      std::cerr << "[Database] init: SUCCESS - mapped_table has " << count
-                << " rows" << std::endl;
-    }
-    sqlite3_finalize(stmt);
-  } else {
-    std::cerr << "[Database] init: ERROR - mapped_table not found: "
-              << sqlite3_errmsg(db) << std::endl;
-    return false;
-  }
-
   return true;
 }
 
 std::vector<std::string> Database::getWords(int key) {
   std::vector<std::string> results;
 
-  // Debug: Check if db is null
-  if (!db) {
-    std::cerr << "[Database] getWords: ERROR - db is null!" << std::endl;
-    return results;
-  }
-
-  // Debug: First, let's check if the table exists and has data
-  sqlite3_stmt *testStmt;
-  std::string testSql = "SELECT COUNT(*) FROM mapped_table";
-  if (sqlite3_prepare_v2(db, testSql.c_str(), -1, &testStmt, 0) == SQLITE_OK) {
-    if (sqlite3_step(testStmt) == SQLITE_ROW) {
-      int count = sqlite3_column_int(testStmt, 0);
-      std::cerr << "[Database] getWords: mapped_table has " << count << " rows"
-                << std::endl;
-    } else {
-      std::cerr << "[Database] getWords: COUNT query returned no rows"
-                << std::endl;
-    }
-  } else {
-    std::cerr << "[Database] getWords: Failed to prepare COUNT query: "
-              << sqlite3_errmsg(db) << std::endl;
-  }
-  sqlite3_finalize(testStmt);
-
   sqlite3_stmt *stmt;
   // Note: mapped_table.id is unique, but user prompt implied word_code logic.
   // Q9Core.cs: "SELECT characters FROM mapped_table WHERE id='{key}'"
   std::string sql = "SELECT characters FROM mapped_table WHERE id = ?";
 
-  std::cerr << "[Database] getWords: querying key=" << key << std::endl;
-
   int prepareResult = sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, 0);
   if (prepareResult == SQLITE_OK) {
     sqlite3_bind_int(stmt, 1, key);
     int stepResult = sqlite3_step(stmt);
-    std::cerr << "[Database] getWords: step result=" << stepResult
-              << " (SQLITE_ROW=" << SQLITE_ROW
-              << ", SQLITE_DONE=" << SQLITE_DONE << ")" << std::endl;
     if (stepResult == SQLITE_ROW) {
       const unsigned char *text = sqlite3_column_text(stmt, 0);
       if (text) {
         std::string rawText(reinterpret_cast<const char *>(text));
-        std::cerr << "[Database] getWords: raw text='" << rawText << "'"
-                  << std::endl;
         // The characters string needs to be split.
         // C# code: splits by text elements (unicode chars).
         // We'll trust our splitUTF8 helper or just return as one string
         // and let Logic split it?
         // Q9Core.cs `sql2strs` splits it into array of chars.
         results = splitUTF8(reinterpret_cast<const char *>(text));
-        std::cerr << "[Database] getWords: split into " << results.size()
-                  << " chars" << std::endl;
       } else {
-        std::cerr << "[Database] getWords: text is NULL" << std::endl;
+        // std::cerr << "[Database] getWords: text is NULL" << std::endl;
       }
     } else {
       std::cerr << "[Database] getWords: no row found for key=" << key

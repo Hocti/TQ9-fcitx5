@@ -4,6 +4,53 @@
 
 set -e
 
+# Check for dependencies
+echo "Checking for dependencies..."
+DEPENDENCIES=("fcitx5" "fcitx5-gtk" "fcitx5-qt" "fcitx5-configtool" "fcitx5-chinese-addons")
+MISSING_DEPS=()
+
+if command -v apt-get &> /dev/null; then
+    for dep in "${DEPENDENCIES[@]}"; do
+        if ! dpkg-query -W -f='${Status}' "$dep" 2>/dev/null | grep -q "ok installed"; then
+            MISSING_DEPS+=("$dep")
+        fi
+    done
+
+    if [ ${#MISSING_DEPS[@]} -gt 0 ]; then
+        echo "The following dependencies appear to be missing: ${MISSING_DEPS[*]}"
+        echo "Attempting to install missing dependencies..."
+        if [ "$EUID" -ne 0 ]; then
+            sudo apt-get update || true
+            sudo apt-get install -y "${MISSING_DEPS[@]}" || echo "Warning: Some packages could not be installed. They may have different names on your system (e.g., Ubuntu uses fcitx5-config-qt instead of fcitx5-configtool)."
+        else
+            apt-get update || true
+            apt-get install -y "${MISSING_DEPS[@]}" || echo "Warning: Some packages could not be installed. They may have different names on your system."
+        fi
+    else
+        echo "Dependencies check completed."
+    fi
+elif command -v pacman &> /dev/null; then
+    for dep in "${DEPENDENCIES[@]}"; do
+        if ! pacman -Qs "^$dep$" > /dev/null 2>&1; then
+            MISSING_DEPS+=("$dep")
+        fi
+    done
+
+    if [ ${#MISSING_DEPS[@]} -gt 0 ]; then
+        echo "Installing missing dependencies using pacman..."
+        if [ "$EUID" -ne 0 ]; then
+            sudo pacman -Sy --noconfirm "${MISSING_DEPS[@]}"
+        else
+            pacman -Sy --noconfirm "${MISSING_DEPS[@]}"
+        fi
+    fi
+else
+    echo "Warning: No supported package manager found (apt-get or pacman). Please ensure the following are installed manually:"
+    echo "${DEPENDENCIES[*]}"
+fi
+
+
+
 # Default to user local install if not root
 if [ "$EUID" -ne 0 ]; then
     PREFIX="$HOME/.local"

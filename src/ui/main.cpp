@@ -28,7 +28,7 @@ static void loadAllImages(const QString &basePath) {
             << std::endl;
 
   int loadedCount = 0;
-  for (int i = 0; i <= 10; ++i) {
+  for (int i = 0; i <= 9; ++i) {
     for (int j = 1; j <= 9; ++j) {
       QString filename = QString("%1_%2.png").arg(i).arg(j);
       QString fullPath = imgPath + "/" + filename;
@@ -231,7 +231,7 @@ int main(int argc, char *argv[]) {
           for (int i = 1; i <= 9; ++i) {
             CustomButton *btn = window.getButton(i);
             if (btn) {
-              QString imagePath = imgPath + QString("/10_%1.png").arg(i);
+              QString imagePath = imgPath + QString("/0_%1.png").arg(i);
               btn->setImage(imagePath);
               btn->setBackgroundColor(Qt::white);
             }

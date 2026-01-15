@@ -115,16 +115,9 @@ bool Q9Logic::processKey(int key) {
         // Full 3-digit code - query and show candidates
         int code = std::stoi(m_state.inputCode);
         std::vector<std::string> words = db.getWords(code);
-        std::cerr << "[Q9Logic] processKey: inputCode='" << m_state.inputCode
-                  << "' code=" << code << " words.size=" << words.size()
-                  << std::endl;
         if (!words.empty()) {
-          std::cerr << "[Q9Logic] processKey: first word='" << words[0] << "'"
-                    << std::endl;
           startSelectWord(words);
         } else {
-          std::cerr << "[Q9Logic] processKey: no words found, calling cancel()"
-                    << std::endl;
           cancel();
         }
       } else if (codeLen == 1) {
@@ -316,8 +309,6 @@ void Q9Logic::selectWord(int index) {
   std::vector<std::string> relates;
   if (!m_state.lastWord.empty()) {
     relates = db.getRelate(m_state.lastWord);
-    std::cerr << "[Q9Logic] selectWord: lastWord='" << m_state.lastWord
-              << "' relates.size=" << relates.size() << std::endl;
   }
 
   // Show key code if coming from homo mode
@@ -337,16 +328,9 @@ void Q9Logic::selectWord(int index) {
 
   // Reset state but keep related words
   if (!relates.empty()) {
-    std::cerr
-        << "[Q9Logic] selectWord: setting relatedWords, calling cancel(false)"
-        << std::endl;
     m_state.relatedWords = relates;
     cancel(false);
-    std::cerr << "[Q9Logic] selectWord: after cancel, relatedWords.size="
-              << m_state.relatedWords.size() << std::endl;
   } else {
-    std::cerr << "[Q9Logic] selectWord: no relates, calling cancel(true)"
-              << std::endl;
     cancel(true);
   }
 }
