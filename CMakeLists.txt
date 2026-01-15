@@ -18,7 +18,8 @@ set(QT_NO_CREATE_VERSIONLESS_TARGETS ON)
 find_package(Fcitx5Core REQUIRED)
 find_package(Qt5 COMPONENTS Core Concurrent REQUIRED)
 find_package(Qt6 COMPONENTS Core Widgets Gui REQUIRED)
-find_package(LayerShellQt REQUIRED)
+# LayerShellQt is optional - only available on systems with Qt6-compatible version
+find_package(LayerShellQt QUIET)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(SQLITE3 REQUIRED sqlite3)
 
@@ -42,7 +43,7 @@ target_link_libraries(tq9
     ${SQLITE3_LIBRARIES}
 )
 
-# UI executable uses Qt6 for LayerShellQt Wayland support
+# UI executable uses Qt6
 add_executable(fcitx5-tq9-ui
     src/ui/main.cpp
     src/ui/FloatingWindow.cpp
@@ -53,13 +54,22 @@ add_executable(fcitx5-tq9-ui
     src/ConfigLoader.h
 )
 
+# Base libraries for UI
 target_link_libraries(fcitx5-tq9-ui
     Qt6::Core
     Qt6::Widgets
     Qt6::Gui
-    LayerShellQt::Interface
     ${SQLITE3_LIBRARIES}
 )
+
+# Conditionally link LayerShellQt if found
+if(LayerShellQt_FOUND)
+    message(STATUS "LayerShellQt found - Wayland layer shell support enabled")
+    target_link_libraries(fcitx5-tq9-ui LayerShellQt::Interface)
+    target_compile_definitions(fcitx5-tq9-ui PRIVATE HAVE_LAYERSHELLQT)
+else()
+    message(STATUS "LayerShellQt not found - building without Wayland layer shell support")
+endif()
 
 target_include_directories(fcitx5-tq9-ui PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"

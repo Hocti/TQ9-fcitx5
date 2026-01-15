@@ -7,9 +7,11 @@
 #include <QTimer>
 #include <QWindow>
 
-// LayerShellQt for Wayland always-on-top
+// LayerShellQt for Wayland always-on-top (optional dependency)
+#ifdef HAVE_LAYERSHELLQT
 #include <LayerShellQt/Shell>
 #include <LayerShellQt/Window>
+#endif
 #include <iostream>
 
 // Helper function to detect if running on Wayland
@@ -56,6 +58,7 @@ void FloatingWindow::setupLayerShell() {
     return;
   }
 
+#ifdef HAVE_LAYERSHELLQT
   // Get the QWindow and configure LayerShellQt
   QWindow *win = windowHandle();
   if (!win) {
@@ -89,10 +92,16 @@ void FloatingWindow::setupLayerShell() {
           << std::endl;
     }
   }
+#else
+  std::cerr << "[FloatingWindow] LayerShellQt not available, using standard "
+               "window mode"
+            << std::endl;
+  move(m_windowPosition);
+#endif
 }
 
 void FloatingWindow::updateLayerShellPosition() {
-  // On X11, use standard Qt move() for positioning
+  // On X11 or when LayerShellQt is not available, use standard Qt move()
   if (!isWayland()) {
     std::cerr << "[FloatingWindow] X11: move to: " << m_windowPosition.x()
               << "," << m_windowPosition.y() << std::endl;
@@ -100,6 +109,7 @@ void FloatingWindow::updateLayerShellPosition() {
     return;
   }
 
+#ifdef HAVE_LAYERSHELLQT
   // Wayland path: use LayerShell margins for positioning
   QWindow *win = windowHandle();
   if (!win) {
@@ -120,6 +130,10 @@ void FloatingWindow::updateLayerShellPosition() {
     std::cerr << "[FloatingWindow] Warning: Could not get LayerShellQt::Window"
               << std::endl;
   }
+#else
+  // LayerShellQt not available, use standard move()
+  move(m_windowPosition);
+#endif
 }
 
 void FloatingWindow::initialize(const AppConfig &config) {
