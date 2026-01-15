@@ -14,6 +14,8 @@ public:
   void initialize(const AppConfig &config);
   CustomButton *getButton(int id);
   void reset();
+  void saveConfig();
+  QString getConfigPath() const { return m_baseConfig.configPath; }
 
 Q_SIGNALS:
   void buttonClicked(int id);

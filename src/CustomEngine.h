@@ -2,6 +2,7 @@
 
 #include "ConfigLoader.h"
 #include "Database.h"
+#include "Q9Logic.h"
 #include <fcitx-utils/eventloopinterface.h>
 #include <fcitx/addonfactory.h>
 #include <fcitx/inputmethodengine.h>
@@ -26,23 +27,22 @@ public:
   std::vector<fcitx::InputMethodEntry> listInputMethods() override;
 
 private:
+  fcitx::Instance *instance_;
+
   void spawnUI();
   void sendToUI(const std::string &cmd);
   void handleUIOutput();
-  void logicDot(fcitx::InputContext *ic);
-  void logicNumber(fcitx::InputContext *ic, int number);
-  void logicSlash(fcitx::InputContext *ic);
+  void updateUIState();
 
-  fcitx::Instance *instance_;
-  Database db_;
-  AppConfig config_;
+  // Logic
+  Q9Logic logic_;
 
   // UI Process Management
   pid_t uiPid_ = -1;
   int uiStdinFd_ = -1;  // Write to UI
   int uiStdoutFd_ = -1; // Read from UI
   std::unique_ptr<fcitx::EventSource> stdoutSource_;
-  std::unique_ptr<fcitx::EventSourceTime> hideTimer_;
+  std::unique_ptr<fcitx::EventSource> hideTimer_;
 
   fcitx::InputContext *activeContext_ = nullptr;
 };

@@ -27,6 +27,7 @@ add_library(custom_input MODULE
     src/CustomEngine.cpp
     src/CustomEngine.h
     src/Database.cpp
+    src/Q9Logic.cpp
     src/Database.h
     src/ConfigLoader.cpp
     src/ConfigLoader.h

@@ -86,6 +86,7 @@ void FloatingWindow::updateLayerShellPosition() {
 
 void FloatingWindow::initialize(const AppConfig &config) {
   m_baseConfig = config;
+  m_windowPosition = QPoint(config.lastX, config.lastY);
   resize(config.windowWidth, config.windowHeight);
 
   // Create buttons
@@ -118,6 +119,22 @@ void FloatingWindow::reset() {
     btn->setDisabledState(false);
   }
   update();
+}
+
+void FloatingWindow::saveConfig() {
+  if (m_baseConfig.configPath.isEmpty())
+    return;
+
+  // Update config with current window state
+  // Position
+  m_baseConfig.lastX = m_windowPosition.x();
+  m_baseConfig.lastY = m_windowPosition.y();
+  m_baseConfig.windowWidth = width();
+  m_baseConfig.windowHeight = height();
+
+  ConfigLoader::save(m_baseConfig.configPath, m_baseConfig);
+  std::cerr << "[FloatingWindow] Configuration saved to "
+            << m_baseConfig.configPath.toStdString() << std::endl;
 }
 
 void FloatingWindow::paintEvent(QPaintEvent *event) {

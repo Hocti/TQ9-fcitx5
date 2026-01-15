@@ -7,6 +7,7 @@
 
 AppConfig ConfigLoader::load(const QString &path) {
   AppConfig config;
+  config.configPath = path;
   QFile file(path);
   if (!file.open(QIODevice::ReadOnly)) {
     qWarning() << "Could not open config file:" << path;
@@ -17,21 +18,74 @@ AppConfig ConfigLoader::load(const QString &path) {
   QJsonDocument doc = QJsonDocument::fromJson(data);
   QJsonObject root = doc.object();
 
-  QJsonObject window = root["window"].toObject();
-  config.windowWidth = window["width"].toInt(400);
-  config.windowHeight = window["height"].toInt(300);
-  config.minWidth = window["minWidth"].toInt(100);
-  config.maxWidth = window["maxWidth"].toInt(800);
+  QJsonObject windowObj = root["window"].toObject();
+  config.windowWidth = windowObj["width"].toInt(240);
+  config.windowHeight = windowObj["height"].toInt(320);
+  config.minWidth = windowObj["minWidth"].toInt(120);
+  config.maxWidth = windowObj["maxWidth"].toInt(480);
 
-  QJsonArray buttons = root["buttons"].toArray();
-  for (const auto &val : buttons) {
-    QJsonObject btn = val.toObject();
-    ButtonConfig btnConfig;
-    btnConfig.id = btn["id"].toInt();
-    btnConfig.rect = QRect(btn["x"].toInt(), btn["y"].toInt(), btn["w"].toInt(),
-                           btn["h"].toInt());
-    config.buttons.push_back(btnConfig);
+  QJsonObject storageObj = root["storage"].toObject();
+  config.lastX = storageObj["x"].toInt(100);
+  config.lastY = storageObj["y"].toInt(100);
+
+  QJsonObject systemObj = root["system"].toObject();
+  config.sc_output = systemObj["sc_output"].toBool(false);
+  config.use_numpad = systemObj["use_numpad"].toBool(true);
+
+  QJsonArray buttonsArray = root["buttons"].toArray();
+  for (const auto &btnVal : buttonsArray) {
+    QJsonObject btnObj = btnVal.toObject();
+    AppConfig::ButtonConfig btnConf;
+    btnConf.id = btnObj["id"].toInt();
+    btnConf.rect = QRect(btnObj["x"].toInt(), btnObj["y"].toInt(),
+                         btnObj["w"].toInt(), btnObj["h"].toInt());
+    config.buttons.push_back(btnConf);
   }
 
   return config;
+}
+
+void ConfigLoader::save(const QString &path, const AppConfig &config) {
+  QFile file(path);
+  if (!file.open(QIODevice::ReadOnly)) {
+    // Read existing first to preserve comments/structure if possible,
+    // but QJsonDocument doesn't support comments.
+    // We will just read to get base object, or start fresh if fails.
+  }
+
+  QByteArray data = file.readAll();
+  file.close();
+
+  QJsonDocument doc = QJsonDocument::fromJson(data);
+  QJsonObject root = doc.object();
+
+  // Update window defaults if we want to save them?
+  // Usually we only save "storage" (state) and maybe "system" settings.
+  // The prompt says "json should storage the last window position, and the
+  // window size"
+
+  // Update Window Size
+  QJsonObject windowObj = root["window"].toObject();
+  windowObj["width"] = config.windowWidth;
+  windowObj["height"] = config.windowHeight;
+  root["window"] = windowObj;
+
+  // Update Storage
+  QJsonObject storageObj = root["storage"].toObject();
+  storageObj["x"] = config.lastX;
+  storageObj["y"] = config.lastY;
+  root["storage"] = storageObj;
+
+  // Update System
+  QJsonObject systemObj = root["system"].toObject();
+  systemObj["sc_output"] = config.sc_output;
+  systemObj["use_numpad"] = config.use_numpad;
+  root["system"] = systemObj;
+
+  // Write back
+  if (file.open(QIODevice::WriteOnly)) {
+    QJsonDocument newDoc(root);
+    file.write(newDoc.toJson());
+    file.close();
+  }
 }

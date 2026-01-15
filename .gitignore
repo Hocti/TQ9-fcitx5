@@ -5,6 +5,7 @@ build_release
 *.o
 install_debug
 install_release
+release_output
 *.log
 .cache
 compile_commands.json
