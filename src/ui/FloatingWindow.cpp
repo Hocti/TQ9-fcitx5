@@ -122,6 +122,34 @@ void FloatingWindow::reset() {
   update();
 }
 
+void FloatingWindow::showWindow() {
+  // On Wayland with LayerShell, after hide() the native window surface becomes
+  // invalid. We need to destroy and recreate it for the window to show
+  // properly.
+  if (m_wasHidden) {
+    std::cerr << "[FloatingWindow] Recreating window surface after hide"
+              << std::endl;
+
+    // Destroy the old window handle - this invalidates the Wayland surface
+    if (windowHandle()) {
+      windowHandle()->destroy();
+    }
+
+    // Create a new native window handle
+    create();
+
+    // Reconfigure LayerShell on the new surface
+    setupLayerShell();
+    updateLayerShellPosition();
+
+    m_wasHidden = false;
+  }
+
+  // Now show and raise the window
+  show();
+  raise();
+}
+
 void FloatingWindow::saveConfig() {
   if (m_baseConfig.configPath.isEmpty())
     return;
@@ -324,7 +352,11 @@ void FloatingWindow::showEvent(QShowEvent *event) {
             << std::endl;
 }
 
-void FloatingWindow::hideEvent(QHideEvent *event) { QWidget::hideEvent(event); }
+void FloatingWindow::hideEvent(QHideEvent *event) {
+  QWidget::hideEvent(event);
+  // Mark that we've been hidden - need to recreate surface on next show
+  m_wasHidden = true;
+}
 
 void FloatingWindow::updateLayout() {
   if (m_baseConfig.windowWidth == 0 || m_baseConfig.windowHeight == 0)

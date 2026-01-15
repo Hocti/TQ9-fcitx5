@@ -204,15 +204,16 @@ void CustomEngine::handleUIOutput() {
       }
     } else if (data.rfind("FOCUS_TRUE", 0) == 0) {
       // UI has focus, do not hide.
-      // Cancel any pending hide logic if we had any (though we rely on
-      // response)
+      // Clear pending flag - we've received the response
+      pendingFocusCheck_ = false;
     } else if (data.rfind("FOCUS_FALSE", 0) == 0) {
-      // UI does not have focus, and we are in deactivate check?
-      // Check if we are still "active" in Fcitx sense?
-      // Actually, if we received FOCUS_FALSE, it means we sent CHECK_FOCUS.
-      // We only send CHECK_FOCUS from deactivate.
-      // So if false, we hide.
-      sendToUI("HIDE");
+      // Only hide if we're still waiting for this response
+      // This prevents race condition where the window was re-activated
+      // between sending CHECK_FOCUS and receiving FOCUS_FALSE
+      if (pendingFocusCheck_) {
+        pendingFocusCheck_ = false;
+        sendToUI("HIDE");
+      }
     }
   } else if (n == 0) {
     // EOF, child died
@@ -231,6 +232,10 @@ void CustomEngine::activate(const fcitx::InputMethodEntry &entry,
     hideTimer_.reset();
   }
 
+  // Cancel any pending focus check to prevent race condition
+  // where FOCUS_FALSE arrives after we've re-activated
+  pendingFocusCheck_ = false;
+
   spawnUI();
   sendToUI("SHOW");
 }
@@ -244,6 +249,7 @@ void CustomEngine::deactivate(const fcitx::InputMethodEntry &entry,
   hideTimer_ = instance_->eventLoop().addTimeEvent(
       CLOCK_MONOTONIC, timeout, 0, // One-shot
       [this](fcitx::EventSourceTime *, uint64_t) {
+        pendingFocusCheck_ = true; // Mark that we're expecting a response
         sendToUI("CHECK_FOCUS");
         hideTimer_.reset();
         return true;

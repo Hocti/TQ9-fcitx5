@@ -54,6 +54,11 @@ private:
 
   // Track if UI is already in base state (to avoid repeated RESET)
   bool lastUIStateWasBase_ = false;
+
+  // Track if we're waiting for a focus check response
+  // Used to prevent race condition where FOCUS_FALSE arrives after
+  // re-activation
+  bool pendingFocusCheck_ = false;
 };
 
 class CustomEngineFactory : public fcitx::AddonFactory {

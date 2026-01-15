@@ -17,6 +17,9 @@ public:
   void saveConfig();
   QString getConfigPath() const { return m_baseConfig.configPath; }
 
+  // Show window with proper LayerShell surface recreation
+  void showWindow();
+
 Q_SIGNALS:
   void buttonClicked(int id);
 
@@ -44,6 +47,9 @@ private:
   QPoint m_windowPosition{100, 100}; // Current position as margins
   QPoint m_dragStartPos;             // Mouse position at drag start
   QPoint m_dragStartWindowPos;       // Window position at drag start
+
+  // Track if window was hidden (need to recreate surface on Wayland)
+  bool m_wasHidden = false;
 
   void updateLayout();
   void setupLayerShell();

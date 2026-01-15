@@ -128,8 +128,8 @@ int main(int argc, char *argv[]) {
         if (line == "SHOW") {
           if (!window.isVisible()) {
             std::cerr << "[UI] Showing window" << std::endl;
-            window.show();
-            window.raise();
+            window
+                .showWindow(); // Use showWindow() for proper surface recreation
           }
         } else if (line == "HIDE") {
           std::cerr << "[UI] Hiding window" << std::endl;
