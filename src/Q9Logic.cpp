@@ -157,6 +157,15 @@ bool Q9Logic::processCommand(Q9Key cmd) {
   case Q9Key::Homo:
     // Toggle homo mode - next selection will query homophones
     m_state.homoMode = !m_state.homoMode;
+    if (m_state.homoMode) {
+      m_state.statusPrefix = "[同音]" + m_state.statusPrefix;
+    } else {
+      std::string target = "[同音]";
+      size_t pos = m_state.statusPrefix.find(target);
+      if (pos != std::string::npos) {
+        m_state.statusPrefix.erase(pos, target.length());
+      }
+    }
     return true;
 
   case Q9Key::Relate:

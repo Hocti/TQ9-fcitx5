@@ -5,6 +5,11 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 
+#ifdef QT_GUI_LIB
+#include <QGuiApplication>
+#include <QScreen>
+#endif
+
 AppConfig ConfigLoader::load(const QString &path) {
   AppConfig config;
   config.configPath = path;
@@ -25,8 +30,23 @@ AppConfig ConfigLoader::load(const QString &path) {
   config.maxWidth = windowObj["maxWidth"].toInt(480);
 
   QJsonObject storageObj = root["storage"].toObject();
-  config.lastX = storageObj["x"].toInt(100);
-  config.lastY = storageObj["y"].toInt(100);
+
+  // Default to 100,100 but try to use screen geometry if GUI is available
+  int defaultX = 50;
+  int defaultY = 50;
+
+#ifdef QT_GUI_LIB
+  QScreen *screen = QGuiApplication::primaryScreen();
+  if (screen) {
+    QRect screenGeom = screen->geometry();
+    // Use windowWidth which was just loaded or defaulted to 240
+    // Position at top-right corner with 50px margin
+    defaultX = screenGeom.width() - config.windowWidth - 50;
+  }
+#endif
+
+  config.lastX = storageObj["x"].toInt(defaultX);
+  config.lastY = storageObj["y"].toInt(defaultY);
 
   QJsonObject systemObj = root["system"].toObject();
   config.sc_output = systemObj["sc_output"].toBool(false);
@@ -42,6 +62,11 @@ AppConfig ConfigLoader::load(const QString &path) {
     btnConf.radius = btnObj["r"].toInt(0);
     config.buttons.push_back(btnConf);
   }
+
+  QJsonObject statusObj = root["status"].toObject();
+  config.statusRect =
+      QRect(statusObj["x"].toInt(), statusObj["y"].toInt(),
+            statusObj["width"].toInt(), statusObj["height"].toInt());
 
   // Load key mappings (numpad mode)
   QJsonObject keyObj = root["key"].toObject();

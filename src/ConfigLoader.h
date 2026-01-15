@@ -31,6 +31,7 @@ struct AppConfig {
     int radius = 0;
   };
   std::vector<ButtonConfig> buttons;
+  QRect statusRect;
 
   // Key mappings (from config.json "key" section) - used with numpad
   QMap<QString, int> keys;

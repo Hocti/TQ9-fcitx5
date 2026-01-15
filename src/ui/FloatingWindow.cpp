@@ -101,6 +101,15 @@ void FloatingWindow::initialize(const AppConfig &config) {
     connect(btn, &CustomButton::clicked, this, &FloatingWindow::buttonClicked);
     m_buttons.push_back(btn);
   }
+
+  if (!m_statusLabel) {
+    m_statusLabel = new QLabel(this);
+    m_statusLabel->setAlignment(Qt::AlignCenter);
+    m_statusLabel->setStyleSheet("color: black; background-color: rgba(255, "
+                                 "255, 255, 150); border-radius: 5px;");
+    m_statusLabel->setText("九万");
+  }
+
   updateLayout();
 
   // Setup LayerShell after initialization
@@ -165,6 +174,12 @@ void FloatingWindow::saveConfig() {
   ConfigLoader::save(m_baseConfig.configPath, m_baseConfig);
   std::cerr << "[FloatingWindow] Configuration saved to "
             << m_baseConfig.configPath.toStdString() << std::endl;
+}
+
+void FloatingWindow::setStatusText(const QString &text) {
+  if (m_statusLabel) {
+    m_statusLabel->setText(text);
+  }
 }
 
 void FloatingWindow::paintEvent(QPaintEvent *event) {
@@ -377,5 +392,20 @@ void FloatingWindow::updateLayout() {
       m_buttons[i]->setRadius(m_baseConfig.buttons[i].radius *
                               (scaleX + scaleY) / 2.0);
     }
+  }
+
+  if (m_statusLabel) {
+    int x = m_baseConfig.statusRect.x() * scaleX;
+    int y = m_baseConfig.statusRect.y() * scaleY;
+    int w = m_baseConfig.statusRect.width() * scaleX;
+    int h = m_baseConfig.statusRect.height() * scaleY;
+    m_statusLabel->setGeometry(x, y, w, h);
+
+    QFont font = m_statusLabel->font();
+    int pixelSize = 14 * (scaleX + scaleY) / 2.0;
+    if (pixelSize < 8)
+      pixelSize = 8;
+    font.setPixelSize(pixelSize);
+    m_statusLabel->setFont(font);
   }
 }

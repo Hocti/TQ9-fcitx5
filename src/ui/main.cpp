@@ -280,9 +280,10 @@ int main(int argc, char *argv[]) {
             }
           }
         } else if (line.startsWith("SET_STATUS ")) {
-          // SET_STATUS <text> - set window title
+          // SET_STATUS <text> - set window title and status label
           QString statusText = line.mid(11).trimmed();
           window.setWindowTitle(statusText);
+          window.setStatusText(statusText);
         }
       }
     } else if (n == 0) {

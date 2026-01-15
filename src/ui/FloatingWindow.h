@@ -2,6 +2,7 @@
 
 #include "../ConfigLoader.h"
 #include "CustomButton.h"
+#include <QLabel>
 #include <QMargins>
 #include <QWidget>
 #include <vector>
@@ -15,6 +16,7 @@ public:
   CustomButton *getButton(int id);
   void reset();
   void saveConfig();
+  void setStatusText(const QString &text);
   QString getConfigPath() const { return m_baseConfig.configPath; }
 
   // Show window with proper LayerShell surface recreation
@@ -35,6 +37,7 @@ protected:
 private:
   AppConfig m_baseConfig;
   std::vector<CustomButton *> m_buttons;
+  QLabel *m_statusLabel = nullptr;
 
   // Resize handling
   enum ResizeEdge { None = 0, Left = 1, Right = 2, Top = 4, Bottom = 8 };
