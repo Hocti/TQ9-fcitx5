@@ -5,11 +5,12 @@
 set -e
 
 # Check for dependencies
+# Check for dependencies
 echo "Checking for dependencies..."
-DEPENDENCIES=("fcitx5" "fcitx5-gtk" "fcitx5-qt" "fcitx5-configtool" "fcitx5-chinese-addons")
-MISSING_DEPS=()
 
 if command -v apt-get &> /dev/null; then
+    DEPENDENCIES=("fcitx5" "fcitx5-frontend-gtk3" "fcitx5-frontend-qt5" "fcitx5-config-qt" "fcitx5-chinese-addons")
+    MISSING_DEPS=()
     for dep in "${DEPENDENCIES[@]}"; do
         if ! dpkg-query -W -f='${Status}' "$dep" 2>/dev/null | grep -q "ok installed"; then
             MISSING_DEPS+=("$dep")
@@ -21,15 +22,17 @@ if command -v apt-get &> /dev/null; then
         echo "Attempting to install missing dependencies..."
         if [ "$EUID" -ne 0 ]; then
             sudo apt-get update || true
-            sudo apt-get install -y "${MISSING_DEPS[@]}" || echo "Warning: Some packages could not be installed. They may have different names on your system (e.g., Ubuntu uses fcitx5-config-qt instead of fcitx5-configtool)."
+            sudo apt-get install -y "${MISSING_DEPS[@]}" || echo "Warning: Some packages could not be installed."
         else
             apt-get update || true
-            apt-get install -y "${MISSING_DEPS[@]}" || echo "Warning: Some packages could not be installed. They may have different names on your system."
+            apt-get install -y "${MISSING_DEPS[@]}" || echo "Warning: Some packages could not be installed."
         fi
     else
         echo "Dependencies check completed."
     fi
 elif command -v pacman &> /dev/null; then
+    DEPENDENCIES=("fcitx5" "fcitx5-gtk" "fcitx5-qt" "fcitx5-configtool" "fcitx5-chinese-addons")
+    MISSING_DEPS=()
     for dep in "${DEPENDENCIES[@]}"; do
         if ! pacman -Qs "^$dep$" > /dev/null 2>&1; then
             MISSING_DEPS+=("$dep")
@@ -45,11 +48,12 @@ elif command -v pacman &> /dev/null; then
         fi
     fi
 else
-    echo "Warning: No supported package manager found (apt-get or pacman). Please ensure the following are installed manually:"
-    echo "${DEPENDENCIES[*]}"
+    echo "Warning: No supported package manager found (apt-get or pacman). Please ensure dependencies are installed manually."
 fi
 
 
+# Get the directory of the script
+SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 
 # Default to user local install if not root
 if [ "$EUID" -ne 0 ]; then
@@ -78,21 +82,21 @@ fi
 mkdir -p "$FCITX_LIB_DIR"
 
 # Copy library
-if [ -d "lib" ]; then
+if [ -d "$SCRIPT_DIR/lib" ]; then
     echo "Copying library to $FCITX_LIB_DIR..."
-    cp lib/fcitx5/*.so "$FCITX_LIB_DIR/"
+    cp "$SCRIPT_DIR/lib/fcitx5/"*.so "$FCITX_LIB_DIR/"
 fi
 
 # Copy bin
-if [ -d "bin" ]; then
+if [ -d "$SCRIPT_DIR/bin" ]; then
     echo "Copying UI executable..."
-    cp bin/* "$PREFIX/bin/"
+    cp "$SCRIPT_DIR/bin/"* "$PREFIX/bin/"
 fi
 
 # Copy share
-if [ -d "share" ]; then
+if [ -d "$SCRIPT_DIR/share" ]; then
     echo "Copying data files..."
-    cp -r share/* "$PREFIX/share/"
+    cp -r "$SCRIPT_DIR/share/"* "$PREFIX/share/"
 fi
 
 echo ""
