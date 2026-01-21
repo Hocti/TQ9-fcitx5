@@ -46,6 +46,9 @@ struct Q9State {
 
   // Related words to display (shown on buttons with images visible)
   std::vector<std::string> relatedWords;
+
+  // Cursor movement request
+  bool moveCursorLeft = false;
 };
 
 class Q9Logic {

@@ -34,6 +34,7 @@ void Q9Logic::cancel(bool cleanRelate) {
   m_state.pageCandidates.clear();
   m_state.statusPrefix = "";
   m_state.imageType = 0;
+  m_state.moveCursorLeft = false;
 
   if (cleanRelate) {
     m_state.relatedWords.clear();
@@ -304,6 +305,7 @@ void Q9Logic::selectWord(int index) {
     // We commit the pair and the engine inserts + moves cursor left
     m_commitString = selectedWord;
     cancel();
+    m_state.moveCursorLeft = true;
     return;
   }
 

@@ -372,18 +372,13 @@ void CustomEngine::keyEvent(const fcitx::InputMethodEntry &entry,
     if (logic_.hasCommitString()) {
       std::string commitStr = logic_.getCommitString();
 
-      // Check if this is an openclose pair (2 chars) - need cursor positioning
+      // Commit the string
+      keyEvent.inputContext()->commitString(commitStr);
+
+      // Check if we need to move cursor left (e.g. for bracket pairs)
       Q9State state = logic_.getState();
-      // Simple check: if we just committed and came from openclose, handle
-      // cursor The openclose mode is reset after commit, so we check commit
-      // string length UTF-8 CJK pairs would be 6 bytes (2 x 3-byte chars)
-      if (commitStr.length() >= 4 && commitStr.length() <= 8) {
-        // Could be bracket pair - commit and move cursor left
-        keyEvent.inputContext()->commitString(commitStr);
-        // TODO: Send Left key to move cursor between brackets
-        // This requires additional Fcitx API or different approach
-      } else {
-        keyEvent.inputContext()->commitString(commitStr);
+      if (state.moveCursorLeft) {
+        keyEvent.inputContext()->forwardKey(fcitx::Key(FcitxKey_Left));
       }
       logic_.clearCommitString();
       changed = true;
