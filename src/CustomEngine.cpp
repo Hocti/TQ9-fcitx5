@@ -397,7 +397,13 @@ void CustomEngine::updateUIState() {
             << state.candidateMode << " inputCode='" << state.inputCode << "'"
             << " relatedWords.size=" << state.relatedWords.size()
             << " pageCandidates.size=" << state.pageCandidates.size()
-            << std::endl;
+            << " state.statusPrefix='" << state.statusPrefix << "'"
+            << " state.page=" << state.page
+            << " state.totalPages=" << state.totalPages << std::endl;
+
+  if (!state.statusPrefix.empty()) {
+    sendToUI("SET_STATUS " + state.statusPrefix);
+  }
 
   if (state.candidateMode) {
     // Candidate mode - show text on buttons 1-9

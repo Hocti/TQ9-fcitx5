@@ -326,6 +326,8 @@ void Q9Logic::selectWord(int index) {
     relates = db.getRelate(m_state.lastWord);
   }
 
+  std::string nextPrefix;
+
   // Show key code if coming from homo mode
   if (m_state.afterHomoMode) {
     m_state.afterHomoMode = false;
@@ -337,7 +339,7 @@ void Q9Logic::selectWord(int index) {
           codesStr += ",";
         codesStr += std::to_string(codes[i]);
       }
-      m_state.statusPrefix = selectedWord + "key:" + codesStr;
+      nextPrefix = selectedWord + ":" + codesStr;
     }
   }
 
@@ -347,6 +349,11 @@ void Q9Logic::selectWord(int index) {
     cancel(false);
   } else {
     cancel(true);
+  }
+
+  if (!nextPrefix.empty()) {
+    m_state.statusPrefix = nextPrefix;
+    std::cout << "nextPrefix: " << nextPrefix << std::endl;
   }
 }
 
