@@ -4,6 +4,7 @@
 #include <QGuiApplication>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QScreen>
 #include <QTimer>
 #include <QWindow>
 
@@ -80,9 +81,7 @@ void FloatingWindow::setupLayerShell() {
       // Anchor to top-left corner - we use margins to position
       layerWindow->setAnchors(LayerShellQt::Window::Anchors(
           LayerShellQt::Window::AnchorTop | LayerShellQt::Window::AnchorLeft));
-      // Set initial position using margins
-      layerWindow->setMargins(
-          QMargins(m_windowPosition.x(), m_windowPosition.y(), 0, 0));
+      // Initial margins will be set by updateLayerShellPosition()
 
       std::cerr << "[FloatingWindow] LayerShellQt configured for overlay layer"
                 << std::endl;
@@ -365,11 +364,8 @@ void FloatingWindow::mouseReleaseEvent(QMouseEvent *event) {
       std::cerr << "[FloatingWindow] Drag ended at: " << globalPos.x() << ","
                 << globalPos.y() << std::endl;
 
-      // Keep position non-negative
-      m_windowPosition.setX(qMax(0, m_dragStartWindowPos.x() + globalPos.x() -
-                                        m_dragStartPos.x()));
-      m_windowPosition.setY(qMax(0, m_dragStartWindowPos.y() + globalPos.y() -
-                                        m_dragStartPos.y()));
+      // Update position with boundary checks
+      ensureWithinScreen(m_dragStartWindowPos + (globalPos - m_dragStartPos));
 
       // Update layer shell margins
       updateLayerShellPosition();
@@ -417,6 +413,8 @@ void FloatingWindow::showEvent(QShowEvent *event) {
   QWidget::showEvent(event);
 
   if (isWayland()) {
+    // Check bounds before configuring
+    ensureWithinScreen();
     // Re-apply LayerShell configuration each time the window is shown
     // On Wayland, the surface may be destroyed when hidden, so we need to
     // reconfigure LayerShell properties
@@ -426,6 +424,7 @@ void FloatingWindow::showEvent(QShowEvent *event) {
               << std::endl;
   } else {
     // On X11, ensure position is correct and window stays on top
+    ensureWithinScreen();
     move(m_windowPosition);
     std::cerr << "[FloatingWindow] showEvent: X11 window shown at "
               << m_windowPosition.x() << "," << m_windowPosition.y()
@@ -439,6 +438,55 @@ void FloatingWindow::hideEvent(QHideEvent *event) {
   QWidget::hideEvent(event);
   // Mark that we've been hidden - need to recreate surface on next show
   m_wasHidden = true;
+}
+
+void FloatingWindow::ensureWithinScreen(std::optional<QPoint> point) {
+  int w = width();
+  int h = height();
+  QScreen *screen = nullptr;
+  QPoint center = point.value_or(m_windowPosition);
+  int x = center.x();
+  int y = center.y();
+
+  screen = QGuiApplication::screenAt(center);
+  if (!screen) {
+    screen = QGuiApplication::screenAt(QPoint(x + w / 2, y + h / 2));
+  }
+  if (!screen) {
+    screen = QGuiApplication::primaryScreen();
+  }
+
+  if (screen) {
+    std::cerr << "[FloatingWindow] center: " << center.x() << "," << center.y()
+              << " screen pos: " << screen->geometry().x() << ","
+              << screen->geometry().y()
+              << " width: " << screen->geometry().width() << ","
+              << " m_isDragging: " << m_isDragging << " QCursor "
+              << QCursor::pos().x() << "," << QCursor::pos().y()
+              << " QCursor+center " << (QCursor::pos() + center).x() << ","
+              << (QCursor::pos() + center).y() << std::endl;
+
+    QRect screenRect = screen->availableGeometry();
+    // Ensure window is within screen bounds
+    if (x + w > screenRect.x() + screenRect.width()) {
+      x = screenRect.x() + screenRect.width() - w;
+    }
+    if (x < screenRect.x()) {
+      x = screenRect.x();
+    }
+    if (y + h > screenRect.y() + screenRect.height()) {
+      y = screenRect.y() + screenRect.height() - h;
+    }
+    if (y < screenRect.y()) {
+      y = screenRect.y();
+    }
+    std::cerr << "[FloatingWindow] set new xy: " << x << "," << y
+              << " old xy: " << m_windowPosition.x() << ","
+              << m_windowPosition.y() << std::endl;
+
+    m_windowPosition.setX(x);
+    m_windowPosition.setY(y);
+  }
 }
 
 void FloatingWindow::updateLayout() {

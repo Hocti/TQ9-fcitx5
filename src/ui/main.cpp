@@ -187,13 +187,14 @@ int main(int argc, char *argv[]) {
                   QString text = item.mid(colIdx + 1);
                   CustomButton *btn = window.getButton(id);
                   if (btn) {
-                    btn->setText(text);
                     btn->setImage(""); // Clear image for text display
                     btn->setOpacity(1);
-                    if (text.isEmpty()) {
+                    if (text.isEmpty() || text == "*") {
+                      btn->setText("");
                       btn->setBackgroundColor(Qt::gray);
                       btn->setDisabledState(true);
                     } else {
+                      btn->setText(text);
                       btn->setBackgroundColor(Qt::white);
                       btn->setDisabledState(false);
                     }

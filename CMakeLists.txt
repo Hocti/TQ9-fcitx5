@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 project(fcitx5-tq9)
 
-set(CMAKE_CXX_STANDARD 17)
+
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
@@ -24,6 +24,28 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(SQLITE3 REQUIRED sqlite3)
 
 include_directories(${Fcitx5Core_INCLUDE_DIRS} ${SQLITE3_INCLUDE_DIRS})
+
+include(CheckCXXSourceCompiles)
+set(CMAKE_REQUIRED_INCLUDES ${Fcitx5Core_INCLUDE_DIRS})
+# Force C++17 check to see if headers break
+set(CMAKE_REQUIRED_FLAGS "-std=c++17") 
+
+check_cxx_source_compiles("
+#include <fcitx-utils/log.h>
+#include <fcitx-utils/standardpath.h>
+int main() { return 0; }
+" FCITX_COMPATIBLE_CXX17)
+
+unset(CMAKE_REQUIRED_FLAGS)
+unset(CMAKE_REQUIRED_INCLUDES)
+
+if(FCITX_COMPATIBLE_CXX17)
+    message(STATUS "Fcitx headers are compatible with C++17. Setting C++17 for wider compatibility.")
+    set(CMAKE_CXX_STANDARD 17)
+else()
+    message(STATUS "Fcitx headers require C++20 (likely std::span). Setting C++20.")
+    set(CMAKE_CXX_STANDARD 20)
+endif()
 
 add_library(tq9 MODULE
     src/addon.cpp

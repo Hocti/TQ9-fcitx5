@@ -5,6 +5,7 @@
 #include <QLabel>
 #include <QMargins>
 #include <QWidget>
+#include <optional>
 #include <vector>
 
 class FloatingWindow : public QWidget {
@@ -55,6 +56,7 @@ private:
   bool m_wasHidden = false;
 
   void updateLayout();
+  void ensureWithinScreen(std::optional<QPoint> point = std::nullopt);
   void setupLayerShell();
   void updateLayerShellPosition(); // Update margins for layer shell
   int getResizeEdge(const QPoint &pos) const;

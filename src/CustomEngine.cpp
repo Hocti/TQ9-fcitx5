@@ -444,7 +444,7 @@ void CustomEngine::updateUIState() {
 
     // Update button 0 and 10 text
     if (state.inputCode.length() == 1) {
-      sendToUI("UPDATE_BUTTONS 0:姓氏|10:取消|");
+      sendToUI("UPDATE_BUTTONS 0:選字|10:取消|");
     } else if (state.inputCode.length() == 2) {
       sendToUI("UPDATE_BUTTONS 0:選字|10:取消|");
     }

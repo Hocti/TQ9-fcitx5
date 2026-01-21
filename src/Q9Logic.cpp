@@ -281,6 +281,10 @@ void Q9Logic::selectWord(int index) {
 
   std::string selectedWord = m_state.pageCandidates[index];
 
+  if (selectedWord == "*") {
+    return;
+  }
+
   if (m_state.homoMode) {
     // Query homophones for this word, stay in selection mode
     m_state.homoMode = false;
