@@ -306,7 +306,7 @@ void FloatingWindow::mouseReleaseEvent(QMouseEvent *event) {
 
       // Calculate aspect ratio from config
       float aspectRatio =
-          (float)m_baseConfig.windowWidth / m_baseConfig.windowHeight;
+          (float)m_baseConfig.defaultWidth / m_baseConfig.defaultHeight;
 
       int minW = m_baseConfig.minWidth;
       int maxW = m_baseConfig.maxWidth;
@@ -490,11 +490,11 @@ void FloatingWindow::ensureWithinScreen(std::optional<QPoint> point) {
 }
 
 void FloatingWindow::updateLayout() {
-  if (m_baseConfig.windowWidth == 0 || m_baseConfig.windowHeight == 0)
+  if (m_baseConfig.defaultWidth == 0 || m_baseConfig.defaultHeight == 0)
     return;
 
-  float scaleX = (float)width() / m_baseConfig.windowWidth;
-  float scaleY = (float)height() / m_baseConfig.windowHeight;
+  float scaleX = (float)width() / m_baseConfig.defaultWidth;
+  float scaleY = (float)height() / m_baseConfig.defaultHeight;
 
   for (size_t i = 0; i < m_buttons.size(); ++i) {
     if (i < m_baseConfig.buttons.size()) {

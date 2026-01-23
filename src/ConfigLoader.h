@@ -14,6 +14,8 @@ struct ButtonConfig {
 struct AppConfig {
   int windowWidth;
   int windowHeight;
+  int defaultWidth = 240;
+  int defaultHeight = 340;
   int minWidth = 100;
   int maxWidth = 800;
 

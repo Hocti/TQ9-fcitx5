@@ -24,12 +24,21 @@ AppConfig ConfigLoader::load(const QString &path) {
   QJsonObject root = doc.object();
 
   QJsonObject windowObj = root["window"].toObject();
-  config.windowWidth = windowObj["width"].toInt(240);
-  config.windowHeight = windowObj["height"].toInt(320);
+  config.defaultWidth = windowObj["width"].toInt(240);
+  config.defaultHeight = windowObj["height"].toInt(340);
   config.minWidth = windowObj["minWidth"].toInt(120);
   config.maxWidth = windowObj["maxWidth"].toInt(480);
 
   QJsonObject storageObj = root["storage"].toObject();
+
+  // Use storage size if available, otherwise default size
+  if (storageObj.contains("width") && storageObj.contains("height")) {
+    config.windowWidth = storageObj["width"].toInt(config.defaultWidth);
+    config.windowHeight = storageObj["height"].toInt(config.defaultHeight);
+  } else {
+    config.windowWidth = config.defaultWidth;
+    config.windowHeight = config.defaultHeight;
+  }
 
   // Default to 100,100 but try to use screen geometry if GUI is available
   int defaultX = 50;
@@ -97,21 +106,20 @@ void ConfigLoader::save(const QString &path, const AppConfig &config) {
   QJsonDocument doc = QJsonDocument::fromJson(data);
   QJsonObject root = doc.object();
 
-  // Update window defaults if we want to save them?
-  // Usually we only save "storage" (state) and maybe "system" settings.
-  // The prompt says "json should storage the last window position, and the
-  // window size"
-
-  // Update Window Size
+  // Update Window Defaults (Do not update defaults from current size!)
+  // Ensure defaults are saved back if they were missing or we want to persist
+  // them
   QJsonObject windowObj = root["window"].toObject();
-  windowObj["width"] = config.windowWidth;
-  windowObj["height"] = config.windowHeight;
+  windowObj["width"] = config.defaultWidth;
+  windowObj["height"] = config.defaultHeight;
   root["window"] = windowObj;
 
-  // Update Storage
+  // Update Storage (Save current size here)
   QJsonObject storageObj = root["storage"].toObject();
   storageObj["x"] = config.lastX;
   storageObj["y"] = config.lastY;
+  storageObj["width"] = config.windowWidth;
+  storageObj["height"] = config.windowHeight;
   root["storage"] = storageObj;
 
   // Update System
