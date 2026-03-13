@@ -106,13 +106,8 @@ void ConfigLoader::save(const QString &path, const AppConfig &config) {
   QJsonDocument doc = QJsonDocument::fromJson(data);
   QJsonObject root = doc.object();
 
-  // Update Window Defaults (Do not update defaults from current size!)
-  // Ensure defaults are saved back if they were missing or we want to persist
-  // them
-  QJsonObject windowObj = root["window"].toObject();
-  windowObj["width"] = config.defaultWidth;
-  windowObj["height"] = config.defaultHeight;
-  root["window"] = windowObj;
+  // We explicitly do NOT update the "window" object so that it permanently retains 
+  // the default configuration settings untouched.
 
   // Update Storage (Save current size here)
   QJsonObject storageObj = root["storage"].toObject();

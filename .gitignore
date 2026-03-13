@@ -1,9 +1,7 @@
 # Build directories
-build/
 build*/
-install_debug/
-install_release/
-release_output/
+install*/
+release*/
 
 # Compiled files
 *.o

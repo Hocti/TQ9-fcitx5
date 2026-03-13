@@ -137,8 +137,9 @@ void FloatingWindow::updateLayerShellPosition() {
 
 void FloatingWindow::initialize(const AppConfig &config) {
   m_baseConfig = config;
-  m_windowPosition = QPoint(config.lastX, config.lastY);
-  resize(config.windowWidth, config.windowHeight);
+
+  // Fast set the size as the default size saved in `window` first
+  resize(config.defaultWidth, config.defaultHeight);
 
   // Create buttons (content will be set by pipe commands from engine)
   for (const auto &btnConf : config.buttons) {
@@ -162,6 +163,10 @@ void FloatingWindow::initialize(const AppConfig &config) {
   }
 
   updateLayout();
+
+  // Resize and move base on data in `storage`
+  m_windowPosition = QPoint(config.lastX, config.lastY);
+  resize(config.windowWidth, config.windowHeight);
 
   // Setup LayerShell after initialization
   setupLayerShell();
