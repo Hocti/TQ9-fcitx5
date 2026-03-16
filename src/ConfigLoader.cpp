@@ -94,22 +94,27 @@ AppConfig ConfigLoader::load(const QString &path) {
 
 void ConfigLoader::save(const QString &path, const AppConfig &config) {
   QFile file(path);
-  if (!file.open(QIODevice::ReadOnly)) {
-    // Read existing first to preserve comments/structure if possible,
-    // but QJsonDocument doesn't support comments.
-    // We will just read to get base object, or start fresh if fails.
+  QJsonObject root;
+
+  // Attempt to load existing file to preserve other fields
+  if (file.open(QIODevice::ReadOnly)) {
+    QByteArray data = file.readAll();
+    file.close();
+
+    QJsonDocument doc = QJsonDocument::fromJson(data);
+    if (!doc.isNull() && doc.isObject()) {
+      root = doc.object();
+    }
+  } else if (file.exists()) {
+    // If file exists but we can't read it, abort to avoid overwriting with
+    // partial data
+    qWarning()
+        << "ConfigLoader::save: Could not open existing config for reading:"
+        << path;
+    return;
   }
 
-  QByteArray data = file.readAll();
-  file.close();
-
-  QJsonDocument doc = QJsonDocument::fromJson(data);
-  QJsonObject root = doc.object();
-
-  // We explicitly do NOT update the "window" object so that it permanently retains 
-  // the default configuration settings untouched.
-
-  // Update Storage (Save current size here)
+  // Update Storage (Save current size and position)
   QJsonObject storageObj = root["storage"].toObject();
   storageObj["x"] = config.lastX;
   storageObj["y"] = config.lastY;
@@ -123,10 +128,14 @@ void ConfigLoader::save(const QString &path, const AppConfig &config) {
   systemObj["use_numpad"] = config.use_numpad;
   root["system"] = systemObj;
 
-  // Write back
-  if (file.open(QIODevice::WriteOnly)) {
+  // Write back to file
+  if (file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
     QJsonDocument newDoc(root);
-    file.write(newDoc.toJson());
+    file.write(newDoc.toJson(QJsonDocument::Indented));
     file.close();
+    qDebug() << "ConfigLoader::save: Successfully updated config at" << path;
+  } else {
+    qWarning() << "ConfigLoader::save: Could not open config file for writing:"
+               << path;
   }
 }
