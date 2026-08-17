@@ -8,6 +8,20 @@
 #include <optional>
 #include <vector>
 
+// Dimming layer drawn over the whole window while recording, with the elapsed
+// time on top of it. A separate child widget so it paints above the buttons.
+class RecordOverlay : public QWidget {
+public:
+  explicit RecordOverlay(QWidget *parent = nullptr);
+  void setSeconds(double seconds);
+
+protected:
+  void paintEvent(QPaintEvent *event) override;
+
+private:
+  double m_seconds = 0.0;
+};
+
 class FloatingWindow : public QWidget {
   Q_OBJECT
 
@@ -23,8 +37,20 @@ public:
   // Show window with proper LayerShell surface recreation
   void showWindow();
 
+  // STT visual state
+  void setRecording(bool recording);
+  void setRecordingSeconds(double seconds);
+  // The record button disappears entirely when STT is off, rather than
+  // sitting there greyed out.
+  void setSttAvailable(bool available);
+  void setTranslateAvailable(bool available);
+
 Q_SIGNALS:
   void buttonClicked(int id);
+  void recordPressed();
+  void recordReleased();
+  void translateRequested();
+  void settingsRequested();
 
 protected:
   void paintEvent(QPaintEvent *event) override;
@@ -39,6 +65,14 @@ private:
   AppConfig m_baseConfig;
   std::vector<CustomButton *> m_buttons;
   QLabel *m_statusLabel = nullptr;
+
+  // Top bar controls (not part of the Q9 keypad, never reported to the engine)
+  CustomButton *m_recordButton = nullptr;
+  CustomButton *m_translateButton = nullptr;
+  CustomButton *m_settingsButton = nullptr;
+  RecordOverlay *m_overlay = nullptr;
+  bool m_sttAvailable = false;
+  bool m_translateAvailable = false;
 
   // Resize handling
   enum ResizeEdge { None = 0, Left = 1, Right = 2, Top = 4, Bottom = 8 };

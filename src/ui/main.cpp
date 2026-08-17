@@ -1,5 +1,8 @@
 #include "ConfigLoader.h"
 #include "FloatingWindow.h"
+#include "stt/SettingsDialog.h"
+#include "stt/SttController.h"
+#include "stt/SttSettings.h"
 #include <QApplication>
 #include <QByteArray>
 #include <QFile>
@@ -101,6 +104,20 @@ static void initializeButtons(FloatingWindow &window, const QString &basePath) {
             << std::endl;
 }
 
+// Send a line to the engine on stdout.
+static void sendToEngine(const QString &line) {
+  std::cout << line.toStdString() << std::endl;
+}
+
+// Payloads that may contain newlines travel base64-encoded over the pipe.
+static QString encodePayload(const QString &text) {
+  return QString::fromLatin1(text.toUtf8().toBase64());
+}
+
+static QString decodePayload(const QString &encoded) {
+  return QString::fromUtf8(QByteArray::fromBase64(encoded.toLatin1()));
+}
+
 int main(int argc, char *argv[]) {
   // Initialize LayerShellQt before QApplication
   // This sets the environment for Wayland layer-shell integration
@@ -110,9 +127,73 @@ int main(int argc, char *argv[]) {
   app.setQuitOnLastWindowClosed(false);
 
   FloatingWindow window;
+  SttController stt;
+
+  window.setSttAvailable(stt.settings().isUsable());
+
+  // ---- STT wiring -------------------------------------------------------
+  QObject::connect(&stt, &SttController::needContext,
+                   []() { sendToEngine("STT_NEED_CONTEXT"); });
+  QObject::connect(&stt, &SttController::needSelection,
+                   []() { sendToEngine("TR_NEED_SELECTION"); });
+  QObject::connect(&stt, &SttController::recordingStarted, [&window]() {
+    window.setRecording(true);
+    window.setStatusText("錄音中…");
+  });
+  QObject::connect(&stt, &SttController::recordingTick, [&window](double s) {
+    window.setRecordingSeconds(s);
+  });
+  QObject::connect(&stt, &SttController::recordingStopped, [&window]() {
+    window.setRecording(false);
+    window.setStatusText("九万");
+  });
+  QObject::connect(&stt, &SttController::requestPending, [&window]() {
+    window.setStatusText("辨識中…");
+    sendToEngine("STT_PENDING");
+  });
+  QObject::connect(&stt, &SttController::translatePending, [&window]() {
+    window.setStatusText("翻譯中…");
+    sendToEngine("TR_PENDING");
+  });
+  QObject::connect(&stt, &SttController::resultReady,
+                   [&window](const QString &text) {
+                     window.setStatusText("九万");
+                     sendToEngine("AI_RESULT " + encodePayload(text));
+                   });
+  QObject::connect(&stt, &SttController::requestAborted, [&window]() {
+    window.setStatusText("九万");
+    sendToEngine("AI_ABORT");
+  });
+  // Keeps the top-bar buttons and the engine in step with the settings.
+  auto applyAvailability = [&window, &stt]() {
+    const bool sttOn = stt.settings().isUsable();
+    // Translating only needs a key, not the STT toggle.
+    const bool translateOn = !stt.settings().apiKey.isEmpty();
+    window.setSttAvailable(sttOn);
+    window.setTranslateAvailable(translateOn);
+    sendToEngine(QString("STT_ENABLED %1").arg(sttOn ? 1 : 0));
+  };
+  QObject::connect(&stt, &SttController::enabledChanged,
+                   [applyAvailability](bool) { applyAvailability(); });
+
+  QObject::connect(&window, &FloatingWindow::recordPressed,
+                   [&stt]() { stt.holdBegin(); });
+  QObject::connect(&window, &FloatingWindow::recordReleased,
+                   [&stt]() { stt.holdEnd(); });
+  QObject::connect(&window, &FloatingWindow::translateRequested,
+                   [&stt]() { stt.requestTranslation(); });
+  QObject::connect(&window, &FloatingWindow::settingsRequested,
+                   [&stt, applyAvailability]() {
+                     SettingsDialog dialog;
+                     if (dialog.exec() == QDialog::Accepted) {
+                       stt.reloadSettings();
+                       applyAvailability();
+                     }
+                   });
 
   QSocketNotifier notifier(STDIN_FILENO, QSocketNotifier::Read);
-  QObject::connect(&notifier, &QSocketNotifier::activated, [&window](int) {
+  QObject::connect(&notifier, &QSocketNotifier::activated,
+                   [&window, &stt, applyAvailability](int) {
     static QByteArray buffer;
     char tmp[4096];
     ssize_t n = read(STDIN_FILENO, tmp, sizeof(tmp));
@@ -169,6 +250,27 @@ int main(int argc, char *argv[]) {
 
           // Initialize buttons with images and Chinese text
           initializeButtons(window, dataPath);
+
+          // STT: the installed default prompt lives beside config.json.
+          // Seed the editable copy now so it is there to be edited.
+          SttPaths::setDataDir(dataPath);
+          SttSettingsIO::loadPromptTemplate();
+          SttSettingsIO::loadTranslatePromptTemplate();
+          stt.reloadSettings();
+          applyAvailability();
+        } else if (line == "STT_START") {
+          // Engine already timed the 取消 long-press for us.
+          stt.startNow();
+        } else if (line == "STT_STOP") {
+          stt.stopNow();
+        } else if (line.startsWith("STT_CONTEXT ")) {
+          stt.setContext(decodePayload(line.mid(12).trimmed()));
+        } else if (line == "STT_CONTEXT") {
+          stt.setContext(QString());
+        } else if (line.startsWith("TR_SELECTION ")) {
+          stt.translateSelection(decodePayload(line.mid(13).trimmed()));
+        } else if (line == "TR_SELECTION") {
+          stt.translateSelection(QString());
         } else if (line == "CHECK_FOCUS") {
           bool active = window.isActiveWindow();
           std::cout << (active ? "FOCUS_TRUE" : "FOCUS_FALSE") << std::endl;

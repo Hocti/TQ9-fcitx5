@@ -22,10 +22,13 @@ public:
 
 Q_SIGNALS:
   void clicked(int id);
+  void pressed(int id);
+  void released(int id);
 
 protected:
   void paintEvent(QPaintEvent *event) override;
   void mousePressEvent(QMouseEvent *event) override;
+  void mouseReleaseEvent(QMouseEvent *event) override;
 
 private:
   int m_id;

@@ -17,7 +17,7 @@ set(QT_NO_CREATE_VERSIONLESS_TARGETS ON)
 
 find_package(Fcitx5Core REQUIRED)
 find_package(Qt5 COMPONENTS Core Concurrent REQUIRED)
-find_package(Qt6 COMPONENTS Core Widgets Gui REQUIRED)
+find_package(Qt6 COMPONENTS Core Widgets Gui Network Multimedia REQUIRED)
 # LayerShellQt is optional - only available on systems with Qt6-compatible version
 find_package(LayerShellQt QUIET)
 find_package(PkgConfig REQUIRED)
@@ -72,6 +72,20 @@ add_executable(fcitx5-tq9-ui
     src/ui/FloatingWindow.h
     src/ui/CustomButton.cpp
     src/ui/CustomButton.h
+    src/ui/stt/SttSettings.cpp
+    src/ui/stt/SttSettings.h
+    src/ui/stt/SttUsageLog.cpp
+    src/ui/stt/SttUsageLog.h
+    src/ui/stt/AudioRecorder.cpp
+    src/ui/stt/AudioRecorder.h
+    src/ui/stt/GeminiClient.cpp
+    src/ui/stt/GeminiClient.h
+    src/ui/stt/SttController.cpp
+    src/ui/stt/SttController.h
+    src/ui/stt/SettingsDialog.cpp
+    src/ui/stt/SettingsDialog.h
+    src/ui/stt/DialogSupport.cpp
+    src/ui/stt/DialogSupport.h
     src/ConfigLoader.cpp
     src/ConfigLoader.h
 )
@@ -81,6 +95,8 @@ target_link_libraries(fcitx5-tq9-ui
     Qt6::Core
     Qt6::Widgets
     Qt6::Gui
+    Qt6::Network
+    Qt6::Multimedia
     ${SQLITE3_LIBRARIES}
 )
 
@@ -95,12 +111,15 @@ endif()
 
 target_include_directories(fcitx5-tq9-ui PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ui"
 )
 
 install(TARGETS tq9 DESTINATION "${CMAKE_INSTALL_LIBDIR}/fcitx5")
 install(TARGETS fcitx5-tq9-ui DESTINATION "${CMAKE_INSTALL_BINDIR}")
 install(FILES data/tq9.conf DESTINATION "${CMAKE_INSTALL_DATADIR}/fcitx5/addon")
 install(FILES data/config.json DESTINATION "${CMAKE_INSTALL_DATADIR}/fcitx5/tq9")
+install(FILES data/stt_prompt.txt DESTINATION "${CMAKE_INSTALL_DATADIR}/fcitx5/tq9")
+install(FILES data/translate_prompt.txt DESTINATION "${CMAKE_INSTALL_DATADIR}/fcitx5/tq9")
 install(FILES data/dataset.db DESTINATION "${CMAKE_INSTALL_DATADIR}/fcitx5/tq9")
 install(FILES data/icons/16x16/tq9.png DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/16x16/apps")
 install(FILES data/icons/24x24/tq9.png DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/24x24/apps")

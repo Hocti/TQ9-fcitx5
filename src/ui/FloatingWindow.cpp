@@ -15,6 +15,14 @@
 #endif
 #include <iostream>
 
+namespace {
+// Ids for the two top-bar controls. Negative so they can never collide with a
+// keypad button id coming from config.json.
+constexpr int kRecordButtonId = -1;
+constexpr int kTranslateButtonId = -2;
+constexpr int kSettingsButtonId = -3;
+} // namespace
+
 // Helper function to detect if running on Wayland
 static bool isWayland() {
   static bool checked = false;
@@ -28,6 +36,39 @@ static bool isWayland() {
               << std::endl;
   }
   return wayland;
+}
+
+RecordOverlay::RecordOverlay(QWidget *parent) : QWidget(parent) {
+  setAttribute(Qt::WA_TransparentForMouseEvents);
+  setAttribute(Qt::WA_NoSystemBackground);
+  hide();
+}
+
+void RecordOverlay::setSeconds(double seconds) {
+  m_seconds = seconds;
+  update();
+}
+
+void RecordOverlay::paintEvent(QPaintEvent *event) {
+  Q_UNUSED(event);
+  QPainter painter(this);
+  painter.setRenderHint(QPainter::Antialiasing);
+
+  painter.setBrush(QColor(0, 0, 0, 160));
+  painter.setPen(Qt::NoPen);
+  painter.drawRoundedRect(rect(), 10, 10);
+
+  const int total = static_cast<int>(m_seconds);
+  const QString label = QStringLiteral("● %1:%2")
+                            .arg(total / 60, 2, 10, QChar('0'))
+                            .arg(total % 60, 2, 10, QChar('0'));
+
+  QFont font = painter.font();
+  font.setPixelSize(qMax(12, height() / 8));
+  font.setBold(true);
+  painter.setFont(font);
+  painter.setPen(QColor(255, 90, 90));
+  painter.drawText(rect(), Qt::AlignCenter, label);
 }
 
 FloatingWindow::FloatingWindow(QWidget *parent)
@@ -161,6 +202,44 @@ void FloatingWindow::initialize(const AppConfig &config) {
                                  "255, 255, 150); border-radius: 5px;");
     m_statusLabel->setText("九万");
   }
+
+  // Top-left bar controls: record (hold to talk) and settings.
+  if (!m_recordButton) {
+    m_recordButton = new CustomButton(kRecordButtonId, this);
+    m_recordButton->setFocusPolicy(Qt::NoFocus);
+    m_recordButton->setText("🎤");
+    m_recordButton->setBackgroundColor(QColor(255, 255, 255, 200));
+    m_recordButton->setRadius(5);
+    connect(m_recordButton, &CustomButton::pressed, this,
+            [this](int) { Q_EMIT recordPressed(); });
+    connect(m_recordButton, &CustomButton::released, this,
+            [this](int) { Q_EMIT recordReleased(); });
+    setSttAvailable(m_sttAvailable);
+  }
+
+  if (!m_translateButton) {
+    m_translateButton = new CustomButton(kTranslateButtonId, this);
+    m_translateButton->setFocusPolicy(Qt::NoFocus);
+    m_translateButton->setText("譯");
+    m_translateButton->setBackgroundColor(QColor(255, 255, 255, 200));
+    m_translateButton->setRadius(5);
+    connect(m_translateButton, &CustomButton::clicked, this,
+            [this](int) { Q_EMIT translateRequested(); });
+    setTranslateAvailable(m_translateAvailable);
+  }
+
+  if (!m_settingsButton) {
+    m_settingsButton = new CustomButton(kSettingsButtonId, this);
+    m_settingsButton->setFocusPolicy(Qt::NoFocus);
+    m_settingsButton->setText("⚙");
+    m_settingsButton->setBackgroundColor(QColor(255, 255, 255, 200));
+    m_settingsButton->setRadius(5);
+    connect(m_settingsButton, &CustomButton::clicked, this,
+            [this](int) { Q_EMIT settingsRequested(); });
+  }
+
+  if (!m_overlay)
+    m_overlay = new RecordOverlay(this);
 
   updateLayout();
 
@@ -519,7 +598,22 @@ void FloatingWindow::updateLayout() {
     int y = m_baseConfig.statusRect.y() * scaleY;
     int w = m_baseConfig.statusRect.width() * scaleX;
     int h = m_baseConfig.statusRect.height() * scaleY;
-    m_statusLabel->setGeometry(x, y, w, h);
+
+    // Top-bar controls sit at the left of the status bar, in order, skipping
+    // any that are currently hidden; the status text takes whatever is left.
+    const int ctrl = qMin(h, w / 4);
+    int slot = 0;
+    for (CustomButton *btn :
+         {m_recordButton, m_translateButton, m_settingsButton}) {
+      if (!btn || btn->isHidden())
+        continue;
+      btn->setGeometry(x + slot * ctrl + 1, y + 1, ctrl - 2, h - 2);
+      btn->setRadius(qMax(2, ctrl / 6));
+      slot++;
+    }
+
+    const int used = slot * ctrl;
+    m_statusLabel->setGeometry(x + used, y, w - used, h);
 
     QFont font = m_statusLabel->font();
     int pixelSize = 14 * (scaleX + scaleY) / 2.0;
@@ -527,5 +621,45 @@ void FloatingWindow::updateLayout() {
       pixelSize = 8;
     font.setPixelSize(pixelSize);
     m_statusLabel->setFont(font);
+  }
+
+  if (m_overlay) {
+    m_overlay->setGeometry(rect());
+    m_overlay->raise();
+  }
+}
+
+void FloatingWindow::setRecording(bool recording) {
+  if (!m_overlay)
+    return;
+
+  if (recording) {
+    m_overlay->setGeometry(rect());
+    m_overlay->setSeconds(0.0);
+    m_overlay->raise();
+    m_overlay->show();
+  } else {
+    m_overlay->hide();
+  }
+}
+
+void FloatingWindow::setRecordingSeconds(double seconds) {
+  if (m_overlay)
+    m_overlay->setSeconds(seconds);
+}
+
+void FloatingWindow::setSttAvailable(bool available) {
+  m_sttAvailable = available;
+  if (m_recordButton) {
+    m_recordButton->setVisible(available);
+    updateLayout();
+  }
+}
+
+void FloatingWindow::setTranslateAvailable(bool available) {
+  m_translateAvailable = available;
+  if (m_translateButton) {
+    m_translateButton->setVisible(available);
+    updateLayout();
   }
 }

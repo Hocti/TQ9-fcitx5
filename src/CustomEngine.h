@@ -33,7 +33,19 @@ private:
   void spawnUI();
   void sendToUI(const std::string &cmd);
   void handleUIOutput();
+  void handleUILine(const std::string &line);
   void updateUIState();
+
+  // STT
+  bool isCancelKey(const fcitx::Key &key) const;
+  bool handleCancelKeyForStt(fcitx::KeyEvent &keyEvent);
+  void applyCancelCommand();
+  void sendSurroundingTextToUI();
+  void sendSelectionToUI();
+  void showSttPlaceholder();
+  void showTranslatePlaceholder();
+  void clearSttPlaceholder();
+  void finishStt(const std::string &text);
 
   // Logic
   Q9Logic logic_;
@@ -59,6 +71,21 @@ private:
   // Used to prevent race condition where FOCUS_FALSE arrives after
   // re-activation
   bool pendingFocusCheck_ = false;
+
+  // Accumulates partial reads from the UI's stdout until a full line arrives
+  std::string uiReadBuffer_;
+
+  // ---- STT state ----
+  // Mirrors the UI's setting; when false the 取消 key behaves as before.
+  bool sttEnabled_ = false;
+  bool cancelKeyDown_ = false;  // guards against X11 auto-repeat
+  bool sttRecording_ = false;   // we told the UI to start recording
+  std::unique_ptr<fcitx::EventSource> cancelHoldTimer_;
+
+  // How the "waiting for Gemini" marker was shown, so we can take it back
+  bool sttPreeditShown_ = false;
+  bool sttPlaceholderCommitted_ = false;
+  fcitx::InputContext *sttContext_ = nullptr;
 };
 
 class CustomEngineFactory : public fcitx::AddonFactory {

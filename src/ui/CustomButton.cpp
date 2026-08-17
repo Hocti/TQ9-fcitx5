@@ -122,7 +122,15 @@ void CustomButton::paintEvent(QPaintEvent *event) {
 
 void CustomButton::mousePressEvent(QMouseEvent *event) {
   if (event->button() == Qt::LeftButton) {
+    Q_EMIT pressed(m_id);
     Q_EMIT clicked(m_id);
   }
   QWidget::mousePressEvent(event);
+}
+
+void CustomButton::mouseReleaseEvent(QMouseEvent *event) {
+  if (event->button() == Qt::LeftButton) {
+    Q_EMIT released(m_id);
+  }
+  QWidget::mouseReleaseEvent(event);
 }

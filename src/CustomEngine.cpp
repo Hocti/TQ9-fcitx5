@@ -1,14 +1,69 @@
 #include "CustomEngine.h"
+#include <QByteArray>
+#include <QString>
+#include <fcitx-utils/capabilityflags.h>
 #include <fcitx-utils/event.h>
 #include <fcitx-utils/key.h>
 #include <fcitx-utils/keysym.h>
 #include <fcitx-utils/standardpath.h>
 #include <fcitx/addonmanager.h>
 #include <fcitx/inputcontext.h>
+#include <fcitx/inputpanel.h>
+#include <fcitx/text.h>
+#include <algorithm>
 #include <iostream>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <vector>
+
+namespace {
+
+// Long-press threshold for the 取消 key before recording kicks in.
+constexpr uint64_t kSttHoldUsec = 500000;
+
+// Shown in the text field while we wait for Gemini to answer.
+const char *kSttPlaceholder = "⏳";
+
+// How much text before the cursor we hand to the model.
+constexpr int kMaxContextChars = 200;
+
+std::string encodeBase64(const QString &text) {
+  return text.toUtf8().toBase64().toStdString();
+}
+
+std::string decodeBase64(const std::string &encoded) {
+  return QByteArray::fromBase64(QByteArray::fromStdString(encoded))
+      .toStdString();
+}
+
+// Trim the context to the last kMaxContextChars, starting at a sentence or
+// line boundary so the model never sees half a word.
+QString trimContext(const QString &text) {
+  if (text.size() <= kMaxContextChars)
+    return text;
+
+  QString tail = text.right(kMaxContextChars);
+
+  static const QString hardBreaks = QStringLiteral("\n\r。！？…；!?;");
+  static const QString softBreaks = QStringLiteral("，、,:：");
+
+  for (const QString &breaks : {hardBreaks, softBreaks}) {
+    int idx = -1;
+    for (int i = 0; i < tail.size(); ++i) {
+      if (breaks.contains(tail.at(i))) {
+        idx = i;
+        break;
+      }
+    }
+    // Only cut if it still leaves a useful amount of context.
+    if (idx != -1 && idx < tail.size() - 20)
+      return tail.mid(idx + 1).trimmed();
+  }
+
+  return tail;
+}
+
+} // namespace
 
 CustomEngine::CustomEngine(fcitx::Instance *instance) : instance_(instance) {
   // Ensure the directory exists (legacy check, still valid)
@@ -170,50 +225,21 @@ void CustomEngine::sendToUI(const std::string &cmd) {
 }
 
 void CustomEngine::handleUIOutput() {
-  char buffer[256];
-  ssize_t n = read(uiStdoutFd_, buffer, sizeof(buffer) - 1);
+  char buffer[4096];
+  ssize_t n = read(uiStdoutFd_, buffer, sizeof(buffer));
   if (n > 0) {
-    buffer[n] = '\0';
-    std::string data(buffer);
-    // Naive line parsing (partial lines possible in real world, handling
-    // strictly here) Ideally buffer accumulation. Assuming "CLICK <n>\n" comes
-    // in one read for now.
-    if (data.rfind("CLICK ", 0) == 0) {
-      int id = std::stoi(data.substr(6));
-      if (activeContext_) {
-        bool changed = false;
-        if (id <= 9) {
-          changed = logic_.processKey(id);
-        } else if (id == 10) {
-          changed = logic_.processCommand(Q9Key::Cancel);
-        } else if (id == 0) {
-          // Button 0 -> Page Down in Candidate Mode?
-          // Logic handles 0 as NextPage or similar if mapped?
-          changed = logic_.processKey(0);
-        }
+    uiReadBuffer_.append(buffer, n);
 
-        if (logic_.hasCommitString()) {
-          activeContext_->commitString(logic_.getCommitString());
-          logic_.clearCommitString();
-          changed = true;
-        }
-
-        if (changed) {
-          updateUIState();
-        }
-      }
-    } else if (data.rfind("FOCUS_TRUE", 0) == 0) {
-      // UI has focus, do not hide.
-      // Clear pending flag - we've received the response
-      pendingFocusCheck_ = false;
-    } else if (data.rfind("FOCUS_FALSE", 0) == 0) {
-      // Only hide if we're still waiting for this response
-      // This prevents race condition where the window was re-activated
-      // between sending CHECK_FOCUS and receiving FOCUS_FALSE
-      if (pendingFocusCheck_) {
-        pendingFocusCheck_ = false;
-        sendToUI("HIDE");
-      }
+    // STT results can be long and arrive split across reads, so accumulate
+    // until we have complete lines.
+    size_t pos;
+    while ((pos = uiReadBuffer_.find('\n')) != std::string::npos) {
+      std::string line = uiReadBuffer_.substr(0, pos);
+      uiReadBuffer_.erase(0, pos + 1);
+      if (!line.empty() && line.back() == '\r')
+        line.pop_back();
+      if (!line.empty())
+        handleUILine(line);
     }
   } else if (n == 0) {
     // EOF, child died
@@ -221,6 +247,67 @@ void CustomEngine::handleUIOutput() {
     uiStdinFd_ = -1;
     uiStdoutFd_ = -1;
     stdoutSource_.reset();
+    uiReadBuffer_.clear();
+  }
+}
+
+void CustomEngine::handleUILine(const std::string &line) {
+  if (line.rfind("CLICK ", 0) == 0) {
+    int id = 0;
+    try {
+      id = std::stoi(line.substr(6));
+    } catch (const std::exception &) {
+      return;
+    }
+    if (activeContext_) {
+      bool changed = false;
+      if (id <= 9) {
+        changed = logic_.processKey(id);
+      } else if (id == 10) {
+        changed = logic_.processCommand(Q9Key::Cancel);
+      } else if (id == 0) {
+        // Button 0 -> Page Down in Candidate Mode?
+        // Logic handles 0 as NextPage or similar if mapped?
+        changed = logic_.processKey(0);
+      }
+
+      if (logic_.hasCommitString()) {
+        activeContext_->commitString(logic_.getCommitString());
+        logic_.clearCommitString();
+        changed = true;
+      }
+
+      if (changed) {
+        updateUIState();
+      }
+    }
+  } else if (line.rfind("FOCUS_TRUE", 0) == 0) {
+    // UI has focus, do not hide.
+    // Clear pending flag - we've received the response
+    pendingFocusCheck_ = false;
+  } else if (line.rfind("FOCUS_FALSE", 0) == 0) {
+    // Only hide if we're still waiting for this response
+    // This prevents race condition where the window was re-activated
+    // between sending CHECK_FOCUS and receiving FOCUS_FALSE
+    if (pendingFocusCheck_) {
+      pendingFocusCheck_ = false;
+      sendToUI("HIDE");
+    }
+  } else if (line.rfind("STT_ENABLED ", 0) == 0) {
+    sttEnabled_ = (line.substr(12) == "1");
+    std::cerr << "[CustomEngine] STT enabled=" << sttEnabled_ << std::endl;
+  } else if (line == "STT_NEED_CONTEXT") {
+    sendSurroundingTextToUI();
+  } else if (line == "TR_NEED_SELECTION") {
+    sendSelectionToUI();
+  } else if (line == "STT_PENDING") {
+    showSttPlaceholder();
+  } else if (line == "TR_PENDING") {
+    showTranslatePlaceholder();
+  } else if (line == "AI_ABORT") {
+    finishStt(std::string());
+  } else if (line.rfind("AI_RESULT ", 0) == 0) {
+    finishStt(decodeBase64(line.substr(10)));
   }
 }
 
@@ -244,6 +331,14 @@ void CustomEngine::deactivate(const fcitx::InputMethodEntry &entry,
                               fcitx::InputContextEvent &event) {
   // activeContext_ = nullptr; // Commented out to allow committing to
   // background app if floating window takes focus
+
+  // Don't leave a push-to-talk hanging if focus moves away mid-press.
+  cancelHoldTimer_.reset();
+  cancelKeyDown_ = false;
+  if (sttRecording_) {
+    sttRecording_ = false;
+    sendToUI("STT_STOP");
+  }
 
   uint64_t timeout = fcitx::now(CLOCK_MONOTONIC) + 100000; // 100ms
   hideTimer_ = instance_->eventLoop().addTimeEvent(
@@ -276,11 +371,198 @@ void CustomEngine::reset(const fcitx::InputMethodEntry &entry,
   // If nothing to reset, do nothing (already in base state)
 }
 
+bool CustomEngine::isCancelKey(const fcitx::Key &key) const {
+  const int sym = key.sym();
+  if (use_numpad_)
+    return key.isKeyPad() && sym == FcitxKey_KP_Decimal;
+
+  auto it = altKeyToCmd_.find(sym);
+  return it != altKeyToCmd_.end() && it->second == Q9Key::Cancel;
+}
+
+void CustomEngine::applyCancelCommand() {
+  bool changed = logic_.processCommand(Q9Key::Cancel);
+  if (logic_.hasCommitString()) {
+    if (activeContext_)
+      activeContext_->commitString(logic_.getCommitString());
+    logic_.clearCommitString();
+    changed = true;
+  }
+  if (changed)
+    updateUIState();
+}
+
+// Press-and-hold on 取消 starts recording; a short tap is a plain Cancel.
+// Returns true when the event was consumed here.
+bool CustomEngine::handleCancelKeyForStt(fcitx::KeyEvent &keyEvent) {
+  keyEvent.filterAndAccept();
+
+  if (keyEvent.isRelease()) {
+    if (!cancelKeyDown_)
+      return true;
+    cancelKeyDown_ = false;
+    cancelHoldTimer_.reset();
+
+    if (sttRecording_) {
+      std::cerr << "[CustomEngine] cancel released - stopping recording"
+                << std::endl;
+      sttRecording_ = false;
+      sendToUI("STT_STOP");
+    } else {
+      // Released before the threshold - ordinary Cancel.
+      std::cerr << "[CustomEngine] cancel tapped (short) - normal Cancel"
+                << std::endl;
+      applyCancelCommand();
+    }
+    return true;
+  }
+
+  // Auto-repeat sends press after press; only the first one starts the clock.
+  if (cancelKeyDown_)
+    return true;
+
+  std::cerr << "[CustomEngine] cancel pressed - hold timer armed" << std::endl;
+  cancelKeyDown_ = true;
+  sttRecording_ = false;
+
+  uint64_t timeout = fcitx::now(CLOCK_MONOTONIC) + kSttHoldUsec;
+  cancelHoldTimer_ = instance_->eventLoop().addTimeEvent(
+      CLOCK_MONOTONIC, timeout, 0,
+      [this](fcitx::EventSourceTime *, uint64_t) {
+        cancelHoldTimer_.reset();
+        if (!cancelKeyDown_)
+          return true;
+        std::cerr << "[CustomEngine] cancel held - sending STT_START"
+                  << std::endl;
+        sttRecording_ = true;
+        sendToUI("STT_START");
+        return true;
+      });
+
+  return true;
+}
+
+void CustomEngine::sendSurroundingTextToUI() {
+  QString context;
+
+  if (activeContext_ &&
+      activeContext_->capabilityFlags().test(
+          fcitx::CapabilityFlag::SurroundingText)) {
+    const auto &surrounding = activeContext_->surroundingText();
+    if (surrounding.isValid()) {
+      const QString all = QString::fromStdString(surrounding.text());
+      const int cursor =
+          std::min<int>(surrounding.cursor(), static_cast<int>(all.size()));
+      context = trimContext(all.left(cursor));
+    }
+  }
+
+  if (context.isEmpty()) {
+    sendToUI("STT_CONTEXT");
+  } else {
+    sendToUI("STT_CONTEXT " + encodeBase64(context));
+  }
+}
+
+void CustomEngine::sendSelectionToUI() {
+  QString selection;
+
+  if (activeContext_ &&
+      activeContext_->capabilityFlags().test(
+          fcitx::CapabilityFlag::SurroundingText)) {
+    const auto &surrounding = activeContext_->surroundingText();
+    // cursor != anchor means there is a selection between the two offsets.
+    if (surrounding.isValid() && surrounding.cursor() != surrounding.anchor()) {
+      const QString all = QString::fromStdString(surrounding.text());
+      int from = static_cast<int>(
+          std::min(surrounding.cursor(), surrounding.anchor()));
+      int to = static_cast<int>(
+          std::max(surrounding.cursor(), surrounding.anchor()));
+      from = std::clamp(from, 0, static_cast<int>(all.size()));
+      to = std::clamp(to, from, static_cast<int>(all.size()));
+      selection = all.mid(from, to - from);
+    }
+  }
+
+  if (selection.isEmpty()) {
+    sendToUI("TR_SELECTION");
+  } else {
+    sendToUI("TR_SELECTION " + encodeBase64(selection));
+  }
+}
+
+void CustomEngine::showTranslatePlaceholder() {
+  if (!activeContext_)
+    return;
+
+  // Anything committed while a selection is active would replace it. Collapse
+  // the selection to its right-hand end first so the translation lands after
+  // the original instead of overwriting it.
+  activeContext_->forwardKey(fcitx::Key(FcitxKey_Right));
+
+  showSttPlaceholder();
+}
+
+void CustomEngine::showSttPlaceholder() {
+  sttContext_ = activeContext_;
+  if (!sttContext_)
+    return;
+
+  if (sttContext_->capabilityFlags().test(fcitx::CapabilityFlag::Preedit)) {
+    fcitx::Text preedit(kSttPlaceholder);
+    preedit.setCursor(0);
+    sttContext_->inputPanel().setClientPreedit(preedit);
+    sttContext_->updatePreedit();
+    sttPreeditShown_ = true;
+  } else {
+    // No preedit support: commit the marker and delete it again later.
+    sttContext_->commitString(kSttPlaceholder);
+    sttPlaceholderCommitted_ = true;
+  }
+}
+
+void CustomEngine::clearSttPlaceholder() {
+  if (!sttContext_)
+    return;
+
+  if (sttPreeditShown_) {
+    sttContext_->inputPanel().setClientPreedit(fcitx::Text());
+    sttContext_->updatePreedit();
+    sttPreeditShown_ = false;
+  }
+
+  if (sttPlaceholderCommitted_) {
+    if (sttContext_->capabilityFlags().test(
+            fcitx::CapabilityFlag::SurroundingText)) {
+      // kSttPlaceholder is a single codepoint.
+      sttContext_->deleteSurroundingText(-1, 1);
+    }
+    sttPlaceholderCommitted_ = false;
+  }
+}
+
+void CustomEngine::finishStt(const std::string &text) {
+  clearSttPlaceholder();
+
+  if (!text.empty() && sttContext_)
+    sttContext_->commitString(text);
+
+  sttContext_ = nullptr;
+}
+
 void CustomEngine::keyEvent(const fcitx::InputMethodEntry &entry,
                             fcitx::KeyEvent &keyEvent) {
+  auto key = keyEvent.key();
+
+  // 取消 doubles as push-to-talk once STT is configured, so it needs both
+  // edges of the key.
+  if (sttEnabled_ && isCancelKey(key)) {
+    handleCancelKeyForStt(keyEvent);
+    return;
+  }
+
   if (keyEvent.isRelease())
     return;
-  auto key = keyEvent.key();
 
   bool handled = false;
   bool changed = false;
