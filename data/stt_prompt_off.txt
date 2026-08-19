@@ -8,22 +8,24 @@ already being written.
 %context%
 </context>
 
+Words, names and jargon this user says often. When the audio is close to one of
+them, prefer it - it is almost certainly what was said. Never output one that
+was not spoken:
+<vocabulary>
+%vocabulary%
+</vocabulary>
+
 The attached audio is %duration% seconds of the user speaking.
 The user speaks: %speech_language%
+Write the answer as: %output_language%
 
-Transcribe the speech into polished written text in that same language, keeping
-its natural script and any code-switching exactly as spoken.
+Transcribe the speech, then render it in the requested output form. Where that
+form differs from what was spoken - another script, register or language -
+convert it faithfully: same meaning, same details, nothing added or explained.
 - Drop filler words, stutters and false starts.
-- Punctuate the way that language is normally punctuated.
+- Punctuate the way the output form is normally punctuated.
 - Keep proper nouns, numbers and technical terms exactly as spoken.
 - If the audio contains no intelligible speech, return an empty string.
 
-Translation mode is "%translate_mode%":
-- "off"  -> fill "original" only, omit "translation".
-- "only" -> fill "translation" only, rendered in %translate_language%,
-            and omit "original".
-- "both" -> fill "original" with the transcription, and put the same content
-            rendered in %translate_language% into "translation".
-
 Answer with a single JSON object and nothing else:
-{"original": "...", "translation": "..."}
+{"original": "..."}

@@ -21,8 +21,7 @@ void SttUsageLog::append(const SttUsageEntry &entry) {
   if (!entry.error.isEmpty())
     obj["error"] = entry.error;
   obj["audioSeconds"] = entry.audioSeconds;
-  obj["textInputTokens"] = entry.textInputTokens;
-  obj["audioInputTokens"] = entry.audioInputTokens;
+  obj["inputTokens"] = entry.inputTokens;
   obj["outputTokens"] = entry.outputTokens;
   obj["costUsd"] = entry.costUsd;
   obj["text"] = entry.text.left(kMaxLoggedTextChars);

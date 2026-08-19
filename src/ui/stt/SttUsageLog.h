@@ -10,8 +10,7 @@ struct SttUsageEntry {
   bool ok = false; // request returned well-formed JSON
   QString error;   // set when !ok
   double audioSeconds = 0.0;
-  int textInputTokens = 0;
-  int audioInputTokens = 0;
+  int inputTokens = 0;
   int outputTokens = 0;
   double costUsd = 0.0;
   QString text; // what was produced (or the raw reply when !ok)

@@ -43,7 +43,9 @@ private:
   void sendSurroundingTextToUI();
   void sendSelectionToUI();
   void showSttPlaceholder();
-  void showTranslatePlaceholder();
+  void showTranslatePlaceholder(bool replace);
+  bool hasSelection(fcitx::InputContext *ic) const;
+  void waitForSelectionCollapse();
   void clearSttPlaceholder();
   void finishStt(const std::string &text);
 
@@ -79,6 +81,7 @@ private:
   // Mirrors the UI's setting; when false the 取消 key behaves as before.
   bool sttEnabled_ = false;
   bool cancelKeyDown_ = false;  // guards against X11 auto-repeat
+  uint64_t sttHoldUsec_ = 500000; // hold before recording, set by the UI
   bool sttRecording_ = false;   // we told the UI to start recording
   std::unique_ptr<fcitx::EventSource> cancelHoldTimer_;
 
@@ -86,6 +89,11 @@ private:
   bool sttPreeditShown_ = false;
   bool sttPlaceholderCommitted_ = false;
   fcitx::InputContext *sttContext_ = nullptr;
+
+  // Waiting for the client to drop the selection before the "insert after"
+  // translation placeholder goes in.
+  std::unique_ptr<fcitx::EventSource> translateCollapseTimer_;
+  int translateCollapseWaits_ = 0;
 };
 
 class CustomEngineFactory : public fcitx::AddonFactory {

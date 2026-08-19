@@ -14,9 +14,9 @@ struct SttResult {
   QString translation;
   QString error;
 
-  // Billing - recorded whether or not the reply was usable.
-  int textInputTokens = 0;
-  int audioInputTokens = 0;
+  // Billing - recorded whether or not the reply was usable. Gemini's prompt
+  // token count already covers the audio, so there is one input figure.
+  int inputTokens = 0;
   int outputTokens = 0;
   double costUsd = 0.0;
   double audioSeconds = 0.0;

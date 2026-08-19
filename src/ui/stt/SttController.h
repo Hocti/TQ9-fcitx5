@@ -4,11 +4,13 @@
 #include "GeminiClient.h"
 #include "SttSettings.h"
 
+#include <QDateTime>
 #include <QObject>
 #include <QTimer>
 
 // Owns the whole STT flow in the UI process:
-//   hold (>=0.5s) -> record (<=3min) -> speech check -> Gemini -> result
+//   hold (>=holdThresholdMs) -> record (<=3min) -> speech check -> Gemini
+//   -> result
 class SttController : public QObject {
   Q_OBJECT
 
@@ -47,8 +49,9 @@ Q_SIGNALS:
   void recordingStopped();
   // Request is in flight - show the loading placeholder at the cursor.
   void requestPending();
-  // Same, but the placeholder goes after the current selection.
-  void translatePending();
+  // Same, but for a translation - `replace` says whether the result should
+  // overwrite the selection or be appended after it.
+  void translatePending(bool replace);
   // Loading placeholder should be replaced with this text.
   void resultReady(const QString &text);
   // Loading placeholder should be removed with nothing put in its place.
@@ -64,10 +67,12 @@ private:
   AudioRecorder m_recorder;
   GeminiClient m_client;
 
-  QTimer m_holdTimer;   // 0.5s before recording actually starts
+  QTimer m_holdTimer;   // settings.holdThresholdMs before recording starts
   QTimer m_maxTimer;    // 3 min hard stop
   QTimer m_tickTimer;   // drives the on-screen elapsed counter
   QString m_context;
+  // Names the kept copy of the take, so a failed request is still findable.
+  QDateTime m_recordingStarted;
 
   // One request at a time, whichever kind - two loading placeholders in the
   // text would be indistinguishable.

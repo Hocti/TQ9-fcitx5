@@ -76,6 +76,8 @@ add_executable(fcitx5-tq9-ui
     src/ui/stt/SttSettings.h
     src/ui/stt/SttUsageLog.cpp
     src/ui/stt/SttUsageLog.h
+    src/ui/stt/SttRawLog.cpp
+    src/ui/stt/SttRawLog.h
     src/ui/stt/AudioRecorder.cpp
     src/ui/stt/AudioRecorder.h
     src/ui/stt/GeminiClient.cpp
@@ -118,8 +120,12 @@ install(TARGETS tq9 DESTINATION "${CMAKE_INSTALL_LIBDIR}/fcitx5")
 install(TARGETS fcitx5-tq9-ui DESTINATION "${CMAKE_INSTALL_BINDIR}")
 install(FILES data/tq9.conf DESTINATION "${CMAKE_INSTALL_DATADIR}/fcitx5/addon")
 install(FILES data/config.json DESTINATION "${CMAKE_INSTALL_DATADIR}/fcitx5/tq9")
-install(FILES data/stt_prompt.txt DESTINATION "${CMAKE_INSTALL_DATADIR}/fcitx5/tq9")
-install(FILES data/translate_prompt.txt DESTINATION "${CMAKE_INSTALL_DATADIR}/fcitx5/tq9")
+# One speech prompt per translate mode, plus the one for translating a selection.
+install(FILES data/stt_prompt_off.txt
+              data/stt_prompt_only.txt
+              data/stt_prompt_both.txt
+              data/translate_prompt.txt
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/fcitx5/tq9")
 install(FILES data/dataset.db DESTINATION "${CMAKE_INSTALL_DATADIR}/fcitx5/tq9")
 install(FILES data/icons/16x16/tq9.png DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/16x16/apps")
 install(FILES data/icons/24x24/tq9.png DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/24x24/apps")

@@ -1,5 +1,8 @@
 #include "GeminiClient.h"
+#include "SttRawLog.h"
 
+#include <QDateTime>
+#include <QElapsedTimer>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -25,41 +28,18 @@ QString endpoint(const QString &model) {
       .arg(model);
 }
 
-// Pull the per-modality prompt token split out of usageMetadata; Gemini bills
-// audio input at a different rate from text.
+// Gemini reports promptTokenCount as the whole input, audio already converted
+// to tokens and included - so there is nothing to split out or add on top.
 void readUsage(const QJsonObject &usage, SttResult &result) {
-  const int promptTotal = usage["promptTokenCount"].toInt(0);
+  result.inputTokens = usage["promptTokenCount"].toInt(0);
   result.outputTokens = usage["candidatesTokenCount"].toInt(0) +
                         usage["thoughtsTokenCount"].toInt(0);
-
-  int audio = 0;
-  int text = 0;
-  const QJsonArray details = usage["promptTokensDetails"].toArray();
-  for (const auto &value : details) {
-    const QJsonObject detail = value.toObject();
-    const QString modality = detail["modality"].toString();
-    const int count = detail["tokenCount"].toInt(0);
-    if (modality == QLatin1String("AUDIO"))
-      audio += count;
-    else
-      text += count;
-  }
-
-  if (details.isEmpty()) {
-    // No breakdown given - charge it all at the text rate.
-    text = promptTotal;
-  } else if (text + audio < promptTotal) {
-    text += promptTotal - (text + audio);
-  }
-
-  result.textInputTokens = text;
-  result.audioInputTokens = audio;
 }
 
 double computeCost(const SttSettings &settings, const SttResult &result) {
-  return result.textInputTokens / 1e6 * settings.priceTextInput +
-         result.audioInputTokens / 1e6 * settings.priceAudioInput +
-         result.outputTokens / 1e6 * settings.priceOutput;
+  const ModelPricing price = settings.pricing();
+  return result.inputTokens / 1e6 * price.input +
+         result.outputTokens / 1e6 * price.output;
 }
 
 // The model occasionally wraps JSON in a ```json fence despite the mime type.
@@ -112,6 +92,18 @@ QString GeminiClient::fillPrompt(const QString &tmpl,
   out.replace(QStringLiteral("%speech_language%"), settings.speechLanguage);
   // Older prompt files used this name for the same field.
   out.replace(QStringLiteral("%target_language%"), settings.speechLanguage);
+  // Empty output language means "leave it in whatever was spoken".
+  const QString output = settings.outputLanguage.trimmed();
+  out.replace(QStringLiteral("%output_language%"),
+              output.isEmpty()
+                  ? QStringLiteral("the same language and register as spoken")
+                  : output);
+  const QString vocabulary = settings.vocabulary.trimmed();
+  out.replace(QStringLiteral("%vocabulary%"),
+              vocabulary.isEmpty() ? QStringLiteral("(none given)")
+                                   : vocabulary);
+  // Each mode has its own prompt file now, so nothing has to branch on this;
+  // still substituted so a hand-edited file mentioning it stays readable.
   out.replace(QStringLiteral("%translate_mode%"),
               translateModeToString(settings.translateMode));
   out.replace(QStringLiteral("%translate_language%"),
@@ -166,17 +158,32 @@ void GeminiClient::send(const SttSettings &settings, const QString &prompt,
   body["contents"] = QJsonArray{content};
   body["generationConfig"] = generationConfig;
 
-  QNetworkRequest request{QUrl(endpoint(settings.model))};
+  const QString url = endpoint(settings.model);
+
+  // Everything the raw log needs about the outgoing half, captured with the
+  // audio already dropped so the entry stays small while it waits.
+  SttRawEntry raw;
+  raw.time = QDateTime::currentDateTime();
+  raw.kind = wav.isEmpty() ? QStringLiteral("translate") : QStringLiteral("stt");
+  raw.model = settings.model;
+  raw.url = url;
+  raw.audioSeconds = audioSeconds;
+  raw.request = SttRawLog::stripAudio(body);
+
+  QNetworkRequest request{QUrl(url)};
   request.setHeader(QNetworkRequest::ContentTypeHeader,
                     QStringLiteral("application/json"));
   request.setRawHeader("x-goog-api-key", settings.apiKey.toUtf8());
   request.setTransferTimeout(kRequestTimeoutMs);
 
+  QElapsedTimer clock;
+  clock.start();
+
   QNetworkReply *reply =
       m_net->post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
 
   connect(reply, &QNetworkReply::finished, this,
-          [this, reply, settings, audioSeconds]() {
+          [this, reply, settings, audioSeconds, raw, clock]() mutable {
             reply->deleteLater();
 
             SttResult result;
@@ -184,6 +191,16 @@ void GeminiClient::send(const SttSettings &settings, const QString &prompt,
             result.model = settings.model;
 
             const QByteArray payload = reply->readAll();
+
+            raw.httpStatus =
+                reply->attribute(QNetworkRequest::HttpStatusCodeAttribute)
+                    .toInt();
+            if (reply->error() != QNetworkReply::NoError)
+              raw.transportError = reply->errorString();
+            raw.response = payload;
+            raw.elapsedMs = clock.elapsed();
+            SttRawLog::append(raw);
+
             const QJsonDocument doc = QJsonDocument::fromJson(payload);
             const QJsonObject root = doc.object();
 

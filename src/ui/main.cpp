@@ -124,6 +124,14 @@ int main(int argc, char *argv[]) {
   LayerShellQt::Shell::useLayerShell();
 
   QApplication app(argc, argv);
+
+  // useLayerShell() works by putting QT_WAYLAND_SHELL_INTEGRATION=layer-shell
+  // in our environment, and the Wayland platform plugin has read it by now.
+  // Left in place it would be inherited by anything we launch - "open the
+  // recordings folder" gave Dolphin a layer surface instead of a window:
+  // fullscreen, absent from the task bar, and passed on again to whatever
+  // Dolphin itself opened.
+  qunsetenv("QT_WAYLAND_SHELL_INTEGRATION");
   app.setQuitOnLastWindowClosed(false);
 
   FloatingWindow window;
@@ -151,9 +159,12 @@ int main(int argc, char *argv[]) {
     window.setStatusText("辨識中…");
     sendToEngine("STT_PENDING");
   });
-  QObject::connect(&stt, &SttController::translatePending, [&window]() {
+  QObject::connect(&stt, &SttController::translatePending,
+                   [&window](bool replace) {
     window.setStatusText("翻譯中…");
-    sendToEngine("TR_PENDING");
+    // The engine has to know before it makes room for the placeholder: only
+    // the appending case needs the selection collapsed first.
+    sendToEngine(replace ? "TR_PENDING replace" : "TR_PENDING after");
   });
   QObject::connect(&stt, &SttController::resultReady,
                    [&window](const QString &text) {
@@ -172,6 +183,8 @@ int main(int argc, char *argv[]) {
     window.setSttAvailable(sttOn);
     window.setTranslateAvailable(translateOn);
     sendToEngine(QString("STT_ENABLED %1").arg(sttOn ? 1 : 0));
+    // The engine times the 取消 long-press itself, so it needs the threshold.
+    sendToEngine(QString("STT_HOLD_MS %1").arg(stt.settings().holdThresholdMs));
   };
   QObject::connect(&stt, &SttController::enabledChanged,
                    [applyAvailability](bool) { applyAvailability(); });
@@ -251,10 +264,13 @@ int main(int argc, char *argv[]) {
           // Initialize buttons with images and Chinese text
           initializeButtons(window, dataPath);
 
-          // STT: the installed default prompt lives beside config.json.
-          // Seed the editable copy now so it is there to be edited.
+          // STT: the installed default prompts live beside config.json.
+          // Seed every editable copy now - all four are listed in the settings
+          // window, so all four have to be there to be edited.
           SttPaths::setDataDir(dataPath);
-          SttSettingsIO::loadPromptTemplate();
+          SttSettingsIO::loadPromptTemplate(TranslateMode::Off);
+          SttSettingsIO::loadPromptTemplate(TranslateMode::Only);
+          SttSettingsIO::loadPromptTemplate(TranslateMode::Both);
           SttSettingsIO::loadTranslatePromptTemplate();
           stt.reloadSettings();
           applyAvailability();

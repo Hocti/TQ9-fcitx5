@@ -11,15 +11,13 @@
 #include <fcitx/inputpanel.h>
 #include <fcitx/text.h>
 #include <algorithm>
+#include <cstdlib>
 #include <iostream>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <vector>
 
 namespace {
-
-// Long-press threshold for the 取消 key before recording kicks in.
-constexpr uint64_t kSttHoldUsec = 500000;
 
 // Shown in the text field while we wait for Gemini to answer.
 const char *kSttPlaceholder = "⏳";
@@ -296,14 +294,24 @@ void CustomEngine::handleUILine(const std::string &line) {
   } else if (line.rfind("STT_ENABLED ", 0) == 0) {
     sttEnabled_ = (line.substr(12) == "1");
     std::cerr << "[CustomEngine] STT enabled=" << sttEnabled_ << std::endl;
+  } else if (line.rfind("STT_HOLD_MS ", 0) == 0) {
+    // How long 取消 must be held before recording starts, set by the user.
+    const long ms = std::strtol(line.substr(12).c_str(), nullptr, 10);
+    if (ms > 0) {
+      sttHoldUsec_ = static_cast<uint64_t>(ms) * 1000;
+      std::cerr << "[CustomEngine] STT hold threshold=" << ms << "ms"
+                << std::endl;
+    }
   } else if (line == "STT_NEED_CONTEXT") {
     sendSurroundingTextToUI();
   } else if (line == "TR_NEED_SELECTION") {
     sendSelectionToUI();
   } else if (line == "STT_PENDING") {
     showSttPlaceholder();
-  } else if (line == "TR_PENDING") {
-    showTranslatePlaceholder();
+  } else if (line == "TR_PENDING" || line.rfind("TR_PENDING ", 0) == 0) {
+    // "TR_PENDING replace" overwrites the selection; anything else (including
+    // the bare form) keeps it and puts the translation after it.
+    showTranslatePlaceholder(line.size() > 11 && line.substr(11) == "replace");
   } else if (line == "AI_ABORT") {
     finishStt(std::string());
   } else if (line.rfind("AI_RESULT ", 0) == 0) {
@@ -334,6 +342,7 @@ void CustomEngine::deactivate(const fcitx::InputMethodEntry &entry,
 
   // Don't leave a push-to-talk hanging if focus moves away mid-press.
   cancelHoldTimer_.reset();
+  translateCollapseTimer_.reset();
   cancelKeyDown_ = false;
   if (sttRecording_) {
     sttRecording_ = false;
@@ -425,7 +434,7 @@ bool CustomEngine::handleCancelKeyForStt(fcitx::KeyEvent &keyEvent) {
   cancelKeyDown_ = true;
   sttRecording_ = false;
 
-  uint64_t timeout = fcitx::now(CLOCK_MONOTONIC) + kSttHoldUsec;
+  uint64_t timeout = fcitx::now(CLOCK_MONOTONIC) + sttHoldUsec_;
   cancelHoldTimer_ = instance_->eventLoop().addTimeEvent(
       CLOCK_MONOTONIC, timeout, 0,
       [this](fcitx::EventSourceTime *, uint64_t) {
@@ -491,16 +500,58 @@ void CustomEngine::sendSelectionToUI() {
   }
 }
 
-void CustomEngine::showTranslatePlaceholder() {
+void CustomEngine::showTranslatePlaceholder(bool replace) {
   if (!activeContext_)
     return;
 
-  // Anything committed while a selection is active would replace it. Collapse
-  // the selection to its right-hand end first so the translation lands after
-  // the original instead of overwriting it.
-  activeContext_->forwardKey(fcitx::Key(FcitxKey_Right));
+  // Anything committed while a selection is active replaces it, which is
+  // exactly what "replace" wants.
+  if (replace) {
+    showSttPlaceholder();
+    return;
+  }
 
-  showSttPlaceholder();
+  // To keep the original, the selection has to be dropped first and the
+  // caret parked at its right-hand end - otherwise the placeholder itself
+  // eats the selected text and the translation ends up replacing it. Right
+  // arrow does exactly that, but the client only moves the caret once it has
+  // handled the event, so the placeholder waits for that to land.
+  activeContext_->forwardKey(fcitx::Key(FcitxKey_Right), false);
+  activeContext_->forwardKey(fcitx::Key(FcitxKey_Right), true);
+
+  translateCollapseWaits_ = 0;
+  waitForSelectionCollapse();
+}
+
+// True only when the client reports a live selection; a client without
+// surrounding text support can't tell us, so it counts as collapsed.
+bool CustomEngine::hasSelection(fcitx::InputContext *ic) const {
+  if (!ic || !ic->capabilityFlags().test(fcitx::CapabilityFlag::SurroundingText))
+    return false;
+
+  const auto &surrounding = ic->surroundingText();
+  return surrounding.isValid() && surrounding.cursor() != surrounding.anchor();
+}
+
+// Re-checks every 40ms, up to ~320ms, then shows the placeholder regardless.
+// Only ever forwards the one Right key - re-sending it would push the caret
+// past the end of the original when the report is merely stale.
+void CustomEngine::waitForSelectionCollapse() {
+  fcitx::InputContext *ic = activeContext_;
+  uint64_t timeout = fcitx::now(CLOCK_MONOTONIC) + 40000; // 40ms
+  translateCollapseTimer_ = instance_->eventLoop().addTimeEvent(
+      CLOCK_MONOTONIC, timeout, 0,
+      [this, ic](fcitx::EventSourceTime *, uint64_t) {
+        translateCollapseTimer_.reset();
+        if (activeContext_ != ic)
+          return true;
+        if (hasSelection(ic) && ++translateCollapseWaits_ < 8) {
+          waitForSelectionCollapse();
+          return true;
+        }
+        showSttPlaceholder();
+        return true;
+      });
 }
 
 void CustomEngine::showSttPlaceholder() {
@@ -542,6 +593,9 @@ void CustomEngine::clearSttPlaceholder() {
 }
 
 void CustomEngine::finishStt(const std::string &text) {
+  // A reply that beats the collapse wait must not leave the timer to plant a
+  // placeholder nobody will clear.
+  translateCollapseTimer_.reset();
   clearSttPlaceholder();
 
   if (!text.empty() && sttContext_)

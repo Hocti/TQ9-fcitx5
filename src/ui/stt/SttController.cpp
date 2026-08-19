@@ -9,16 +9,25 @@
 #include <iostream>
 
 namespace {
-constexpr int kHoldThresholdMs = 500;
 constexpr int kMaxRecordingMs = 3 * 60 * 1000;
 constexpr int kTickIntervalMs = 100;
+
+void writeWav(const QString &path, const QByteArray &wav) {
+  QFile file(path);
+  if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+    std::cerr << "[STT] Could not write " << path.toStdString() << std::endl;
+    return;
+  }
+  file.write(wav);
+  file.close();
+}
 } // namespace
 
 SttController::SttController(QObject *parent) : QObject(parent) {
   m_settings = SttSettingsIO::load();
 
   m_holdTimer.setSingleShot(true);
-  m_holdTimer.setInterval(kHoldThresholdMs);
+  m_holdTimer.setInterval(m_settings.holdThresholdMs);
   connect(&m_holdTimer, &QTimer::timeout, this, &SttController::startNow);
 
   m_maxTimer.setSingleShot(true);
@@ -37,6 +46,7 @@ SttController::SttController(QObject *parent) : QObject(parent) {
 void SttController::reloadSettings() {
   const bool wasUsable = m_settings.isUsable();
   m_settings = SttSettingsIO::load();
+  m_holdTimer.setInterval(m_settings.holdThresholdMs);
   if (m_settings.isUsable() != wasUsable)
     Q_EMIT enabledChanged(m_settings.isUsable());
 }
@@ -54,8 +64,8 @@ void SttController::holdBegin() {
     std::cerr << "[STT] hold ignored: already recording" << std::endl;
     return;
   }
-  std::cerr << "[STT] hold started, recording in " << kHoldThresholdMs << "ms"
-            << std::endl;
+  std::cerr << "[STT] hold started, recording in "
+            << m_settings.holdThresholdMs << "ms" << std::endl;
   m_holdTimer.start();
 }
 
@@ -90,6 +100,10 @@ void SttController::startNow() {
 
   m_context.clear();
   Q_EMIT needContext();
+
+  // Stamped before start() so the saved file is named after the moment the
+  // user began speaking, not the moment the take was written out.
+  m_recordingStarted = QDateTime::currentDateTime();
 
   if (!m_recorder.start()) {
     std::cerr << "[STT] start failed: could not open the microphone"
@@ -130,13 +144,19 @@ void SttController::onRecordingFinished() {
   // Dev aid: keep the last take on disk (overwritten each time) so a bad
   // result can be listened back to. Written before the speech check so
   // rejected takes can be inspected too.
-  QFile dump(SttPaths::lastRecordingFile());
-  if (dump.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-    dump.write(wav);
-    dump.close();
-  } else {
-    std::cerr << "[STT] Could not write "
-              << SttPaths::lastRecordingFile().toStdString() << std::endl;
+  writeWav(SttPaths::lastRecordingFile(), wav);
+
+  // The kept archive, when asked for: same file, named after the start of the
+  // recording, and written before anything can go wrong with the request.
+  if (m_settings.saveRecordings) {
+    const QDateTime started = m_recordingStarted.isValid()
+                                  ? m_recordingStarted
+                                  : QDateTime::currentDateTime();
+    const QString path =
+        QStringLiteral("%1/%2.wav")
+            .arg(SttPaths::recordingsDir(),
+                 started.toString(QStringLiteral("yyyyMMdd-HHmmss")));
+    writeWav(path, wav);
   }
 
   double speechRatio = 0.0;
@@ -152,8 +172,11 @@ void SttController::onRecordingFinished() {
             << std::endl;
   TonePlayer::instance()->play(TonePlayer::RecordStop);
 
+  // Each translate mode has its own prompt file; the one for the current
+  // mode is what gets sent.
   const QString prompt = GeminiClient::fillPrompt(
-      SttSettingsIO::loadPromptTemplate(), m_settings, m_context, seconds);
+      SttSettingsIO::loadPromptTemplate(m_settings.translateMode), m_settings,
+      m_context, seconds);
 
   m_requestPending = true;
   m_pendingKind = RequestKind::Speech;
@@ -189,7 +212,8 @@ void SttController::translateSelection(const QString &selection) {
 
   m_requestPending = true;
   m_pendingKind = RequestKind::Translate;
-  Q_EMIT translatePending();
+  Q_EMIT translatePending(m_settings.translateInsert ==
+                          TranslateInsert::Replace);
   m_client.sendText(m_settings, prompt);
 }
 
@@ -210,8 +234,7 @@ void SttController::onReplyFinished(const SttResult &result) {
   entry.ok = result.ok;
   entry.error = result.error;
   entry.audioSeconds = result.audioSeconds;
-  entry.textInputTokens = result.textInputTokens;
-  entry.audioInputTokens = result.audioInputTokens;
+  entry.inputTokens = result.inputTokens;
   entry.outputTokens = result.outputTokens;
   entry.costUsd = result.costUsd;
   entry.kind = (kind == RequestKind::Translate) ? QStringLiteral("translate")
