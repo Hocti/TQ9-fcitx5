@@ -26,6 +26,8 @@ struct AppConfig {
 	// System
 	bool sc_output = false;
 	bool use_numpad = true;
+	// 常用字調前: let what the user types reorder the candidate lists.
+	bool freq_order = true;
 
 	struct ButtonConfig {
 		int id;

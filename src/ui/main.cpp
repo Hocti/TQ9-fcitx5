@@ -185,6 +185,8 @@ int main(int argc, char *argv[]) {
     sendToEngine(QString("STT_ENABLED %1").arg(sttOn ? 1 : 0));
     // The engine times the 取消 long-press itself, so it needs the threshold.
     sendToEngine(QString("STT_HOLD_MS %1").arg(stt.settings().holdThresholdMs));
+    // 常用字調前 lives in config.json, which only this side reads.
+    sendToEngine(QString("FREQ_ENABLED %1").arg(window.freqOrder() ? 1 : 0));
   };
   QObject::connect(&stt, &SttController::enabledChanged,
                    [applyAvailability](bool) { applyAvailability(); });
@@ -196,10 +198,15 @@ int main(int argc, char *argv[]) {
   QObject::connect(&window, &FloatingWindow::translateRequested,
                    [&stt]() { stt.requestTranslation(); });
   QObject::connect(&window, &FloatingWindow::settingsRequested,
-                   [&stt, applyAvailability]() {
+                   [&stt, &window, applyAvailability]() {
                      SettingsDialog dialog;
+                     // Not an STT setting: it comes from config.json and goes
+                     // back there, the dialog only edits it.
+                     dialog.setFrequencyOrder(window.freqOrder());
                      if (dialog.exec() == QDialog::Accepted) {
                        stt.reloadSettings();
+                       window.setFreqOrder(dialog.frequencyOrder());
+                       window.saveConfig();
                        applyAvailability();
                      }
                    });

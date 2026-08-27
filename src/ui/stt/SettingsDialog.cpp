@@ -45,13 +45,31 @@ QHBoxLayout *makeRadioRow(QWidget *parent, QButtonGroup *group,
 } // namespace
 
 SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
-  setWindowTitle(QStringLiteral("九万 - 語音輸入設定"));
+  setWindowTitle(QStringLiteral("九万 - 設定"));
   setModal(false);
 
   // Everything lives inside a scroll area so the window never grows past the
   // screen - a layer surface taller than the output cannot be reached.
   auto *page = new QWidget(this);
   auto *root = new QVBoxLayout(page);
+
+  // ---- 選字 -------------------------------------------------------------
+  auto *inputBox = new QGroupBox(QStringLiteral("選字"), page);
+  auto *inputForm = new QFormLayout(inputBox);
+
+  m_freqOrder = new QCheckBox(QStringLiteral("常用字調前"), inputBox);
+  inputForm->addRow(m_freqOrder);
+
+  auto *freqHint = new QLabel(
+      QStringLiteral("打過兩次以上的字排到第二頁前面（頭九個字次序不變）；\n"
+                     "連打過兩次的字組會排到「下個字」的最前面。"),
+      inputBox);
+  freqHint->setStyleSheet(QStringLiteral("color: gray;"));
+  inputForm->addRow(freqHint);
+
+  root->addWidget(inputBox);
+
+  // ---- 語音輸入 ---------------------------------------------------------
   auto *form = new QFormLayout();
 
   m_enabled = new QCheckBox(QStringLiteral("啟用語音輸入 (STT)"), page);
@@ -300,6 +318,14 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
   loadIntoWidgets();
   refreshCostLabels();
   configureDialogForLayerShell(this);
+}
+
+void SettingsDialog::setFrequencyOrder(bool on) {
+  m_freqOrder->setChecked(on);
+}
+
+bool SettingsDialog::frequencyOrder() const {
+  return m_freqOrder->isChecked();
 }
 
 void SettingsDialog::loadIntoWidgets() {

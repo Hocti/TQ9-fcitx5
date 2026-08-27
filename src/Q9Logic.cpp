@@ -1,11 +1,71 @@
 #include "Q9Logic.h"
+#include <algorithm>
+#include <chrono>
 #include <iostream>
+#include <unordered_set>
+
+namespace {
+
+// Candidates per page. The first page is what the reordering must never
+// disturb.
+constexpr size_t kPageSize = 9;
+
+// Two characters only count as "typed one after the other" within this gap;
+// past it the user has moved on and the pair says nothing.
+constexpr int64_t kPairMaxGapMs = 5000;
+
+int64_t nowMs() {
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+}
+
+// True for exactly one Han character - which is also what rules punctuation
+// out, CJK punctuation living outside these blocks.
+bool isSingleChineseChar(const std::string &s) {
+  const unsigned char *p = reinterpret_cast<const unsigned char *>(s.data());
+  const size_t n = s.size();
+  uint32_t cp = 0;
+  size_t len = 0;
+
+  if (n >= 1 && p[0] < 0x80) {
+    cp = p[0];
+    len = 1;
+  } else if (n >= 2 && (p[0] & 0xE0) == 0xC0) {
+    cp = ((p[0] & 0x1Fu) << 6) | (p[1] & 0x3Fu);
+    len = 2;
+  } else if (n >= 3 && (p[0] & 0xF0) == 0xE0) {
+    cp = ((p[0] & 0x0Fu) << 12) | ((p[1] & 0x3Fu) << 6) | (p[2] & 0x3Fu);
+    len = 3;
+  } else if (n >= 4 && (p[0] & 0xF8) == 0xF0) {
+    cp = ((p[0] & 0x07u) << 18) | ((p[1] & 0x3Fu) << 12) |
+         ((p[2] & 0x3Fu) << 6) | (p[3] & 0x3Fu);
+    len = 4;
+  } else {
+    return false;
+  }
+
+  if (len != n)
+    return false; // more than one character
+
+  return (cp >= 0x4E00 && cp <= 0x9FFF) ||   // CJK Unified Ideographs
+         (cp >= 0x3400 && cp <= 0x4DBF) ||   // Extension A
+         (cp >= 0xF900 && cp <= 0xFAFF) ||   // Compatibility Ideographs
+         (cp >= 0x20000 && cp <= 0x2FA1F);   // Extension B and beyond
+}
+
+} // namespace
 
 Q9Logic::Q9Logic() {}
 
 Q9Logic::~Q9Logic() {}
 
-bool Q9Logic::init(const std::string &dbPath) { return db.init(dbPath); }
+bool Q9Logic::init(const std::string &dbPath, const std::string &userDbPath) {
+  // The statistics are a convenience: if they cannot be opened the engine
+  // still works, it just never reorders anything.
+  userDb_.init(userDbPath);
+  return db.init(dbPath);
+}
 
 void Q9Logic::clearCommitString() { m_commitString.clear(); }
 
@@ -18,6 +78,9 @@ Q9State Q9Logic::getState() const { return m_state; }
 void Q9Logic::reset() {
   m_state = Q9State();
   m_commitString.clear();
+  // Focus moved or the input was thrown away: whatever comes next is not
+  // "the character after" the last one.
+  m_prevChar.clear();
 }
 
 // Cancel and reset state - mirrors C# cancel(bool cleanRelate)
@@ -47,7 +110,8 @@ void Q9Logic::startSelectWord(const std::vector<std::string> &words) {
     return;
 
   m_state.candidates = words;
-  m_state.totalPages = (words.size() + 8) / 9; // ceil(size/9)
+  promoteFrequent(m_state.candidates);
+  m_state.totalPages = (m_state.candidates.size() + 8) / 9; // ceil(size/9)
   m_state.candidateMode = true;
   m_state.inputCode = "";
   m_state.imageType = -1; // Signal to show text, not images
@@ -103,6 +167,7 @@ bool Q9Logic::processKey(int key) {
 
       std::vector<std::string> words = db.getWords(code);
       if (!words.empty()) {
+        m_source = CandidateSource::Code;
         startSelectWord(words);
       } else {
         cancel();
@@ -117,6 +182,7 @@ bool Q9Logic::processKey(int key) {
         int code = std::stoi(m_state.inputCode);
         std::vector<std::string> words = db.getWords(code);
         if (!words.empty()) {
+          m_source = CandidateSource::Code;
           startSelectWord(words);
         } else {
           cancel();
@@ -174,8 +240,9 @@ bool Q9Logic::processCommand(Q9Key cmd) {
     if (!m_state.lastWord.empty()) {
       m_state.homoMode = false;
       m_state.statusPrefix = "[" + m_state.lastWord + "]關聯";
-      std::vector<std::string> relates = db.getRelate(m_state.lastWord);
+      std::vector<std::string> relates = relatedFor(m_state.lastWord);
       if (!relates.empty()) {
+        m_source = CandidateSource::Relate;
         startSelectWord(relates);
       }
     }
@@ -229,6 +296,7 @@ bool Q9Logic::processCommand(Q9Key cmd) {
         pairs.push_back(combined.substr(i, len1 + len2));
         i += len1 + len2;
       }
+      m_source = CandidateSource::OpenClose;
       startSelectWord(pairs);
     }
     return true;
@@ -243,6 +311,7 @@ bool Q9Logic::processCommand(Q9Key cmd) {
         std::vector<std::string> words = db.getWords(1000);
         if (!words.empty()) {
           m_state.shortcutMode = true;
+          m_source = CandidateSource::Shortcut;
           startSelectWord(words);
         }
       } else if (m_state.inputCode.length() == 1) {
@@ -252,6 +321,7 @@ bool Q9Logic::processCommand(Q9Key cmd) {
         std::vector<std::string> words = db.getWords(1000 + digit);
         if (!words.empty()) {
           m_state.shortcutMode = true;
+          m_source = CandidateSource::Shortcut;
           startSelectWord(words);
         }
       }
@@ -293,6 +363,7 @@ void Q9Logic::selectWord(int index) {
     m_state.statusPrefix = "同音[" + selectedWord + "]";
     std::vector<std::string> homos = db.getHomo(selectedWord);
     if (!homos.empty()) {
+      m_source = CandidateSource::Homo;
       startSelectWord(homos);
     }
     return;
@@ -304,6 +375,7 @@ void Q9Logic::selectWord(int index) {
     // The UI/engine should handle positioning cursor between brackets
     // We commit the pair and the engine inserts + moves cursor left
     m_commitString = selectedWord;
+    recordCommit(selectedWord, false);
     cancel();
     m_state.moveCursorLeft = true;
     return;
@@ -311,6 +383,11 @@ void Q9Logic::selectWord(int index) {
 
   // Normal selection - commit word
   m_commitString = selectedWord;
+
+  // Only the 選字表 and 同音 count: picking off the 下個字 list (or 速選) is
+  // taking a suggestion, and feeding that back would just entrench it.
+  recordCommit(selectedWord, m_source == CandidateSource::Code ||
+                                 m_source == CandidateSource::Homo);
 
   // Store for relate feature (single character only)
   // UTF-8: typical CJK char is 3 bytes
@@ -323,7 +400,7 @@ void Q9Logic::selectWord(int index) {
   // Query related words for display
   std::vector<std::string> relates;
   if (!m_state.lastWord.empty()) {
-    relates = db.getRelate(m_state.lastWord);
+    relates = relatedFor(m_state.lastWord);
   }
 
   std::string nextPrefix;
@@ -359,3 +436,76 @@ void Q9Logic::selectWord(int index) {
 
 // Legacy - not used, keeping for compatibility
 void Q9Logic::updateCandidates() { updatePage(); }
+
+// One committed character, as far as the statistics are concerned. Anything
+// that is not a single Han character - punctuation, a bracket pair, a 速選
+// phrase - ends the run rather than joining it, so no pair straddles it.
+void Q9Logic::recordCommit(const std::string &word, bool countable) {
+  if (!userDb_.ready())
+    return;
+
+  if (!countable || !isSingleChineseChar(word)) {
+    m_prevChar.clear();
+    return;
+  }
+
+  const int64_t now = nowMs();
+  userDb_.addChar(word);
+  if (!m_prevChar.empty() && now - m_prevCharMs <= kPairMaxGapMs)
+    userDb_.addPair(m_prevChar, word);
+
+  m_prevChar = word;
+  m_prevCharMs = now;
+}
+
+// Move the characters this user actually types to the front of the second
+// page. The first nine keep their order and their keys: those are the ones
+// muscle memory knows, and shuffling them would cost more than it saves.
+void Q9Logic::promoteFrequent(std::vector<std::string> &words) const {
+  if (!freqOrder_ || !userDb_.ready() || words.size() <= kPageSize)
+    return;
+
+  // Only the lists a code leads to. The 下個字 list has its own ordering (see
+  // relatedFor), and 速選 / bracket pairs are symbol tables with no 常用字 to
+  // speak of.
+  if (m_source != CandidateSource::Code && m_source != CandidateSource::Homo)
+    return;
+
+  std::vector<std::string> hot, rest;
+  for (size_t i = kPageSize; i < words.size(); ++i) {
+    if (userDb_.charCount(words[i]) >= UserDb::kMinCount)
+      hot.push_back(words[i]);
+    else
+      rest.push_back(words[i]);
+  }
+
+  if (hot.empty())
+    return;
+
+  // Stable, so equally-used characters stay in the order the dataset had them.
+  std::stable_sort(hot.begin(), hot.end(),
+                   [this](const std::string &a, const std::string &b) {
+                     return userDb_.charCount(a) > userDb_.charCount(b);
+                   });
+
+  words.erase(words.begin() + kPageSize, words.end());
+  words.insert(words.end(), hot.begin(), hot.end());
+  words.insert(words.end(), rest.begin(), rest.end());
+}
+
+// The 下個字 list for `word`: the characters this user has typed after it go
+// first - straight onto the first page, unlike the 常用字 promotion - and are
+// added outright when the shipped list never had them.
+std::vector<std::string> Q9Logic::relatedFor(const std::string &word) {
+  std::vector<std::string> base = db.getRelate(word);
+  if (!freqOrder_ || !userDb_.ready() || word.empty())
+    return base;
+
+  std::vector<std::string> merged = userDb_.followers(word);
+  std::unordered_set<std::string> seen(merged.begin(), merged.end());
+  for (const auto &candidate : base) {
+    if (seen.insert(candidate).second)
+      merged.push_back(candidate);
+  }
+  return merged;
+}

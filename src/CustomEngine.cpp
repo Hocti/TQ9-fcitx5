@@ -80,11 +80,17 @@ CustomEngine::CustomEngine(fcitx::Instance *instance) : instance_(instance) {
     std::string dataDir = configPath.substr(0, configPath.rfind('/'));
     std::string dbPath = dataDir + "/dataset.db";
 
+    // What the user types is counted in a database of its own, in the user's
+    // data dir: the shipped dataset.db sits in a read-only /usr on a root
+    // install and must not be written to in any case.
+    std::string userDbPath = userPkgData + "/tq9/user_stats.db";
+
     std::cerr << "[CustomEngine] Config path: " << configPath << std::endl;
     std::cerr << "[CustomEngine] Database path: " << dbPath << std::endl;
+    std::cerr << "[CustomEngine] User stats path: " << userDbPath << std::endl;
 
     // init logic with correct database path
-    if (!logic_.init(dbPath)) {
+    if (!logic_.init(dbPath, userDbPath)) {
       std::cerr << "Logic DB Init Failed: " << dbPath << std::endl;
     } else {
       std::cerr << "[CustomEngine] Logic DB initialized successfully"
@@ -93,6 +99,7 @@ CustomEngine::CustomEngine(fcitx::Instance *instance) : instance_(instance) {
 
     AppConfig config = ConfigLoader::load(QString::fromStdString(configPath));
     use_numpad_ = config.use_numpad;
+    logic_.setFrequencyOrder(config.freq_order);
 
     // Build altkey -> num mapping (for num0~num9)
     // Config stores Windows VK codes (uppercase ASCII for letters: A=65, X=88,
@@ -137,7 +144,8 @@ CustomEngine::CustomEngine(fcitx::Instance *instance) : instance_(instance) {
                 << " -> keysym " << keysym << std::endl;
     }
 
-    std::cerr << "[CustomEngine] use_numpad=" << use_numpad_ << std::endl;
+    std::cerr << "[CustomEngine] use_numpad=" << use_numpad_
+              << " freq_order=" << config.freq_order << std::endl;
   }
 }
 
@@ -302,6 +310,11 @@ void CustomEngine::handleUILine(const std::string &line) {
       std::cerr << "[CustomEngine] STT hold threshold=" << ms << "ms"
                 << std::endl;
     }
+  } else if (line.rfind("FREQ_ENABLED ", 0) == 0) {
+    // 常用字調前, toggled in the settings window - applies without a restart.
+    const bool on = (line.substr(13) == "1");
+    logic_.setFrequencyOrder(on);
+    std::cerr << "[CustomEngine] freq_order=" << on << std::endl;
   } else if (line == "STT_NEED_CONTEXT") {
     sendSurroundingTextToUI();
   } else if (line == "TR_NEED_SELECTION") {
@@ -737,9 +750,10 @@ void CustomEngine::updateUIState() {
             << " state.page=" << state.page
             << " state.totalPages=" << state.totalPages << std::endl;
 
-  if (!state.statusPrefix.empty()) {
-    sendToUI("SET_STATUS " + state.statusPrefix);
-  }
+  // Every branch below feeds this one SET_STATUS at the end: sending it
+  // unconditionally is what clears a prefix the logic has already dropped
+  // (e.g. toggling [同音] off while the base state is already on screen).
+  std::string status = state.statusPrefix.empty() ? "九万" : state.statusPrefix;
 
   if (state.candidateMode) {
     // Candidate mode - show text on buttons 1-9
@@ -763,14 +777,12 @@ void CustomEngine::updateUIState() {
     std::cerr << "[CustomEngine] Sending: " << cmd << std::endl;
     sendToUI(cmd);
 
-    // Send status text with page info
+    // Status text with page info
     if (state.totalPages > 1) {
-      std::string status = "SET_STATUS " + state.statusPrefix + " " +
-                           std::to_string(state.page + 1) + "/" +
-                           std::to_string(state.totalPages) + "頁";
-      sendToUI(status);
-    } else if (!state.statusPrefix.empty()) {
-      sendToUI("SET_STATUS " + state.statusPrefix);
+      std::string pageInfo = std::to_string(state.page + 1) + "/" +
+                             std::to_string(state.totalPages) + "頁";
+      status = state.statusPrefix.empty() ? pageInfo
+                                          : state.statusPrefix + " " + pageInfo;
     }
     lastUIStateWasBase_ = false;
   } else if (!state.inputCode.empty()) {
@@ -788,7 +800,7 @@ void CustomEngine::updateUIState() {
 
     // Show status
     if (!state.statusPrefix.empty()) {
-      sendToUI("SET_STATUS 九万 " + state.statusPrefix);
+      status = "九万 " + state.statusPrefix;
     }
     lastUIStateWasBase_ = false;
   } else if (!state.relatedWords.empty()) {
@@ -806,10 +818,11 @@ void CustomEngine::updateUIState() {
     if (!lastUIStateWasBase_) {
       std::cerr << "[CustomEngine] Sending: RESET" << std::endl;
       sendToUI("RESET");
-      sendToUI("SET_STATUS 九万");
       lastUIStateWasBase_ = true;
     }
   }
+
+  sendToUI("SET_STATUS " + status);
 }
 
 std::vector<fcitx::InputMethodEntry> CustomEngine::listInputMethods() {

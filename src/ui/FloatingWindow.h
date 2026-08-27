@@ -34,6 +34,10 @@ public:
   void setStatusText(const QString &text);
   QString getConfigPath() const { return m_baseConfig.configPath; }
 
+  // 常用字調前, kept in config.json's "system" section beside use_numpad.
+  bool freqOrder() const { return m_baseConfig.freq_order; }
+  void setFreqOrder(bool on) { m_baseConfig.freq_order = on; }
+
   // Show window with proper LayerShell surface recreation
   void showWindow();
 

@@ -23,6 +23,11 @@ public:
   // Settings as saved by the user (valid after exec() returns Accepted).
   const SttSettings &settings() const { return m_settings; }
 
+  // 常用字調前 is not an STT setting - it lives in config.json and is only
+  // edited here, so it is handed in before exec() and read back after.
+  void setFrequencyOrder(bool on);
+  bool frequencyOrder() const;
+
 private:
   void loadIntoWidgets();
   void applyFromWidgets();
@@ -40,6 +45,7 @@ private:
 
   SttSettings m_settings;
 
+  QCheckBox *m_freqOrder = nullptr;
   QCheckBox *m_enabled = nullptr;
   QLineEdit *m_apiKey = nullptr;
   QLineEdit *m_speechLanguage = nullptr;

@@ -60,6 +60,7 @@ AppConfig ConfigLoader::load(const QString &path) {
   QJsonObject systemObj = root["system"].toObject();
   config.sc_output = systemObj["sc_output"].toBool(false);
   config.use_numpad = systemObj["use_numpad"].toBool(true);
+  config.freq_order = systemObj["freq_order"].toBool(true);
 
   QJsonArray buttonsArray = root["buttons"].toArray();
   for (const auto &btnVal : buttonsArray) {
@@ -126,6 +127,7 @@ void ConfigLoader::save(const QString &path, const AppConfig &config) {
   QJsonObject systemObj = root["system"].toObject();
   systemObj["sc_output"] = config.sc_output;
   systemObj["use_numpad"] = config.use_numpad;
+  systemObj["freq_order"] = config.freq_order;
   root["system"] = systemObj;
 
   // Write back to file

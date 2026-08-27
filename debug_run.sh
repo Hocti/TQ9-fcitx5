@@ -152,13 +152,52 @@ EOF
 # 5. Take over KWin's input-method slot.
 OLD_IM=$(kreadconfig6 --file kwinrc --group Wayland --key InputMethod)
 
-# KWin re-reads InputMethod= only when it (re)starts the input method, and it
-# does that when the virtual keyboard is toggled - hence the off/on flip.
+# A run that was killed before its cleanup leaves our own entry in kwinrc.
+# Saving that as "the previous value" would make cleanup restore the debug
+# build as the session's permanent input method.
+if [ "$OLD_IM" = "$DESKTOP_FILE" ]; then
+    echo "kwinrc still points at this script's entry - a previous run did not"
+    echo "clean up. Falling back to the system input method."
+    if [ -f /usr/share/applications/org.fcitx.Fcitx5.desktop ]; then
+        OLD_IM=/usr/share/applications/org.fcitx.Fcitx5.desktop
+    else
+        OLD_IM=""
+    fi
+fi
+
+# Always delete before writing: KConfig emits the notify signal kick_kwin
+# depends on only when the value actually changes, so re-writing the value
+# already on disk is a silent no-op.
+set_input_method() {
+    kwriteconfig6 --file kwinrc --group Wayland --key InputMethod --notify --delete
+    if [ -n "$1" ]; then
+        kwriteconfig6 --file kwinrc --group Wayland --key InputMethod --notify "$1"
+    fi
+}
+
+# Two separate things have to happen, and missing either one silently leaves
+# the *installed* /usr build running while everything above looks like it
+# worked:
+#
+#   1. KWin must notice kwinrc changed at all. It watches the file through
+#      KConfigWatcher, which listens for the org.kde.kconfig.notify D-Bus
+#      signal - a signal kwriteconfig6 only emits with --notify. A plain
+#      kwriteconfig6 updates the file on disk and KWin never re-reads it, so
+#      /KWin reconfigure re-parses a config KWin already believes it has and
+#      InputMethod= keeps its value from session start. (KConfig also skips the
+#      signal when the value written equals the one already there.)
+#   2. KWin must then restart the input method, which it does when the virtual
+#      keyboard is toggled off and on - hence the flip.
+#
+# Step 2 without step 1 restarts the *old* command: that is exactly the
+# "已安裝好的舊版" symptom, and the debug log stays empty because the wrapper
+# was never executed.
 kick_kwin() {
     qdbus6 org.kde.KWin /KWin reconfigure > /dev/null 2>&1
+    sleep 1
     qdbus6 org.kde.KWin /VirtualKeyboard \
         org.kde.kwin.VirtualKeyboard.enabled false > /dev/null 2>&1
-    sleep 0.5
+    sleep 1
     qdbus6 org.kde.KWin /VirtualKeyboard \
         org.kde.kwin.VirtualKeyboard.enabled true > /dev/null 2>&1
 }
@@ -171,13 +210,9 @@ cleanup() {
 
     echo ""
     echo "Restoring KWin's input method..."
-    if [ -n "$OLD_IM" ]; then
-        kwriteconfig6 --file kwinrc --group Wayland --key InputMethod "$OLD_IM"
-    else
-        # It was unset (KDE Virtual Keyboard = None); leaving our entry behind
-        # would silently keep the debug build as the session's input method.
-        kwriteconfig6 --file kwinrc --group Wayland --key InputMethod --delete
-    fi
+    # An unset OLD_IM means KDE Virtual Keyboard = None; leaving our entry
+    # behind would silently keep the debug build as the session's input method.
+    set_input_method "$OLD_IM"
     kick_kwin
 
     # KWin stops the process it started, but insist if something hung on to it.
@@ -216,7 +251,7 @@ echo "Logs are being written to $LOG_FILE"
 echo "----------------------------------------------------------------"
 
 : > "$LOG_FILE"
-kwriteconfig6 --file kwinrc --group Wayland --key InputMethod "$DESKTOP_FILE"
+set_input_method "$DESKTOP_FILE"
 kick_kwin
 
 # Tail logs in background

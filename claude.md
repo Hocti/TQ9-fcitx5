@@ -5,6 +5,9 @@ A Qt-based floating window UI for the Q9 input method engine on Linux (supportin
 
 ## Source Structure
 - `src/`: Core logic and UI
+  - `UserDb.cpp` / `.h`: The user's own typing statistics (see 常用字調前
+    below). Separate from `Database`, which only ever reads the shipped
+    `dataset.db`.
   - `ConfigLoader.cpp` / `.h`: Handles JSON configuration loading and saving. Maintains a distinction between default window settings (`window`) and runtime state (`storage`).
   - `ui/`: UI components
     - `FloatingWindow.cpp` / `.h`: The main frameless, transparent overlay window. Also hosts the top-bar record/settings buttons and the recording overlay.
@@ -17,7 +20,53 @@ A Qt-based floating window UI for the Q9 input method engine on Linux (supportin
     `translate_prompt.txt`: the four default prompt templates (seed the
     user-editable copies) - one per 語音 translate mode, plus 譯 selection.
   - `img/`: Button assets.
-  - `dataset.db`: SQLite database for the engine.
+  - `dataset.db`: SQLite database for the engine. Read-only - on a root
+    install it lives in `/usr/share` and could not be written anyway.
+
+## 常用字調前 (frequency ordering)
+Optional, on by default, toggled in the 選字 group of the settings window
+(⚙ button). Everything happens in the engine; the UI only owns the checkbox.
+
+What the user types is counted in `~/.local/share/fcitx5/tq9/user_stats.db`,
+created on first use - never `dataset.db`. Two tables, both small enough to be
+held in memory by `UserDb` and written through on every commit (WAL,
+`synchronous=NORMAL`, so a commit never costs a disk flush):
+
+| table | holds |
+| --- | --- |
+| `char_freq` | how often each character was typed |
+| `pair_freq` | how often one character was typed straight after another |
+
+A character counts only when it was picked off a list a code led to - the 選字表
+or 同音. Picking off the 下個字 list (the 關聯 key), off 速選, or a bracket pair
+is following a suggestion, and feeding that back would only entrench it.
+Anything that is not a single Han character - punctuation included, which lives
+outside the CJK ideograph blocks - is not counted either, and *ends* the run
+rather than joining it, so no pair straddles it. Two characters form a pair only
+when they were committed within `kPairMaxGapMs` (5s) of each other; past that
+the user has moved on. `Q9Logic::reset()` (focus change, input thrown away)
+breaks the run too.
+
+Nothing is promoted below `UserDb::kMinCount` (2), so one stray selection never
+reshuffles anything. Above it, two separate promotions:
+
+- **選字表** (`promoteFrequent`): characters with a count move to the front of
+  the *second* page, most-typed first. The first nine keep their order and their
+  keys - that is what muscle memory knows, and shuffling it would cost more than
+  it saves. Only the 選字表 and 同音 lists are touched.
+- **下個字** (`relatedFor`): characters the user has typed after this one go
+  straight to the front, first page included, and are *added* when the shipped
+  `related_candidates_table` never had them.
+
+Statistics are collected whether the setting is on or off - the setting only
+decides whether the order may change - so switching it on takes effect at once
+instead of starting from nothing.
+
+The setting itself is `system.freq_order` in `config.json`, read by the engine
+at startup beside `use_numpad`. The settings window edits it through
+`ConfigLoader::save` and sends `FREQ_ENABLED 0|1` so it also applies without a
+restart. Like the window position, it only persists where `config.json` is
+writable.
 
 ## STT (語音輸入)
 Optional; off until the user enters a Gemini API key in the settings window
@@ -142,7 +191,7 @@ right-hand end so the translation lands after the original.
 ## Configuration (config.json)
 - `window`: Default settings (width, height, constraints). Should not be modified at runtime.
 - `storage`: Runtime persistent state (last position, current size). Updated by `ConfigLoader::save`.
-- `system`: Runtime settings (numpad mode, output options).
+- `system`: Runtime settings (numpad mode, output options, `freq_order`).
 - `buttons`: Layout definitions for the interface.
 - `key` / `altkey`: Keycode mappings.
 
@@ -185,6 +234,9 @@ right-hand end so the translation lands after the original.
   script refuses to start as root.
 
 ## Recent Changes
+- Added 常用字調前: the engine counts what the user types in a database of its
+  own and uses it to reorder the second page of the 選字表 and the front of the
+  下個字 list. Toggled in the new 選字 group of the settings window.
 - Split the speech prompt into one file per translate mode
   (`stt_prompt_off/only/both.txt`); with `translate_prompt.txt` that makes four
   prompt files, each asking for exactly the JSON fields it needs.

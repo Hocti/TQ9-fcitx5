@@ -30,6 +30,28 @@ To facilitate the deployment of this IME on your system, please adhere to the fo
    ```
    Finally, append the "TQ9" input method to your active configuration through the Fcitx5 configuration tool.
 
+### Troubleshooting
+
+**The floating UI never appears and the log shows `error due to GNU_PROPERTY_1_NEEDED_INDIRECT_EXTERN_ACCESS`**
+
+```
+warning: copy relocation against non-copyable protected symbol
+  `_ZN15QSocketNotifier16staticMetaObjectE' in `/usr/lib/libQt6Core.so.6'
+fcitx5-tq9-ui: _ZN15QSocketNotifier16staticMetaObjectE: /usr/lib/libQt6Core.so.6:
+  error due to GNU_PROPERTY_1_NEEDED_INDIRECT_EXTERN_ACCESS
+```
+
+Distributions such as Arch build Qt6 with indirect external access, and a
+`fcitx5-tq9-ui` compiled without the matching flag cannot be loaded against it.
+Releases from 2026-08-27 onwards are built with `-mno-direct-extern-access` and
+run on both kinds of system; upgrade to the latest archive. When building from
+source, simply reconfigure the project — CMake applies the flag automatically:
+
+```bash
+cmake -B build -S . -DCMAKE_BUILD_TYPE=Release && cmake --build build -j$(nproc)
+readelf -r build/fcitx5-tq9-ui | grep -c R_X86_64_COPY   # must print 0
+```
+
 ## Operational Instructions
 
 The input mechanics, shortcut configurations, and user interface paradigms are designed to remain consistent with the original `Q9CS` implementation. For comprehensive documentation regarding keystroke mappings, Numpad optimization, and advanced customization, please consult the [Original Q9CS Documentation](https://github.com/Hocti/Q9CS#readme).

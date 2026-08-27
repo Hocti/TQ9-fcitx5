@@ -8,7 +8,8 @@
   "storage": {},
   "system": {
     "sc_output": false,
-    "use_numpad": true
+    "use_numpad": true,
+    "freq_order": true
   },
   "status": {
     "x": 0,
