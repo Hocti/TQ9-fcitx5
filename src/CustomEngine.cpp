@@ -892,7 +892,7 @@ void CustomEngine::updateUIState() {
   // Every branch below feeds this one SET_STATUS at the end: sending it
   // unconditionally is what clears a prefix the logic has already dropped
   // (e.g. toggling [同音] off while the base state is already on screen).
-  std::string status = state.statusPrefix.empty() ? "九万" : state.statusPrefix;
+  std::string status = state.statusPrefix.empty() ? "三三" : state.statusPrefix;
 
   if (state.candidateMode) {
     // Candidate mode - show text on buttons 1-9
@@ -939,7 +939,7 @@ void CustomEngine::updateUIState() {
 
     // Show status
     if (!state.statusPrefix.empty()) {
-      status = "九万 " + state.statusPrefix;
+      status = "三三" + state.statusPrefix;
     }
     lastUIStateWasBase_ = false;
   } else if (!state.relatedWords.empty()) {

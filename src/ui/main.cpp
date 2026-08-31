@@ -177,7 +177,7 @@ int main(int argc, char *argv[]) {
   });
   QObject::connect(&stt, &SttController::recordingStopped, [&window]() {
     window.setRecording(false);
-    window.setStatusText("九万");
+    window.setStatusText("三三");
   });
   QObject::connect(&stt, &SttController::requestPending, [&window]() {
     window.setStatusText("辨識中…");
@@ -192,11 +192,11 @@ int main(int argc, char *argv[]) {
   });
   QObject::connect(&stt, &SttController::resultReady,
                    [&window](const QString &text) {
-                     window.setStatusText("九万");
+                     window.setStatusText("三三");
                      sendToEngine("AI_RESULT " + encodePayload(text));
                    });
   QObject::connect(&stt, &SttController::requestAborted, [&window]() {
-    window.setStatusText("九万");
+    window.setStatusText("三三");
     sendToEngine("AI_ABORT");
   });
   // Keeps the top-bar buttons and the engine in step with the settings.

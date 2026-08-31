@@ -1,8 +1,8 @@
-# 九万輸入法 Fcitx (Q9Fcitx)
+# 三三輸入法 Fcitx (Q9Fcitx)
 
 ## Introduction
 
-**九万輸入法 Fcitx** is a specialized Chinese Input Method Engine (IME) developed for the Linux platform, specifically tailored for the **Fcitx5** framework. This project represents a comprehensive port of the Windows-based portable IME, [Q9CS](https://github.com/Hocti/Q9CS), adapting its functionality for contemporary Linux environments.
+**三三輸入法 Fcitx** is a specialized Chinese Input Method Engine (IME) developed for the Linux platform, specifically tailored for the **Fcitx5** framework. This project represents a comprehensive port of the Windows-based portable IME, [ThreeThree](https://github.com/Hocti/ThreeThree), adapting its functionality for contemporary Linux environments.
 
 The core input logic is based on the traditional **Q9** methodology, which resides in the public domain following the expiration of patent **HK1035043**.
 
@@ -17,7 +17,7 @@ Out of an abundance of caution regarding potential copyright complexities—part
 
 To facilitate the deployment of this IME on your system, please adhere to the following steps:
 
-1. **Download:** Acquisition of the latest archive can be performed via the [Releases](https://github.com/Hocti/Q9-Linux/releases) page.
+1. **Download:** Acquisition of the latest archive can be performed via the [Releases](https://github.com/Hocti/TQ9-fcitx5/releases) page.
 2. **Extraction:** Decompress the downloaded archive.
 3. **Execution:** Navigate to the extracted directory and run the installation script:
    ```bash
@@ -54,7 +54,7 @@ readelf -r build/fcitx5-tq9-ui | grep -c R_X86_64_COPY   # must print 0
 
 ## Operational Instructions
 
-The input mechanics, shortcut configurations, and user interface paradigms are designed to remain consistent with the original `Q9CS` implementation. For comprehensive documentation regarding keystroke mappings, Numpad optimization, and advanced customization, please consult the [Original Q9CS Documentation](https://github.com/Hocti/Q9CS#readme).
+The input mechanics, shortcut configurations, and user interface paradigms are designed to remain consistent with the original `Q9CS` implementation. For comprehensive documentation regarding keystroke mappings, Numpad optimization, and advanced customization, please consult the [Original Q9CS Documentation](https://github.com/Hocti/ThreeThree#readme).
 
 ### Core Features
 

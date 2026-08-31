@@ -200,7 +200,7 @@ void FloatingWindow::initialize(const AppConfig &config) {
     m_statusLabel->setAlignment(Qt::AlignCenter);
     m_statusLabel->setStyleSheet("color: black; background-color: rgba(255, "
                                  "255, 255, 150); border-radius: 5px;");
-    m_statusLabel->setText("九万");
+    m_statusLabel->setText("三三");
   }
 
   // Top-left bar controls: record (hold to talk) and settings.

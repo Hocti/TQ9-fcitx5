@@ -45,7 +45,7 @@ QHBoxLayout *makeRadioRow(QWidget *parent, QButtonGroup *group,
 } // namespace
 
 SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
-  setWindowTitle(QStringLiteral("九万 - 設定"));
+  setWindowTitle(QStringLiteral("三三輸入法 - 設定"));
   setModal(false);
 
   // Everything lives inside a scroll area so the window never grows past the

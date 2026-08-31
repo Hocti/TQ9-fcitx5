@@ -277,7 +277,7 @@ void SttController::maybeAlertOnSpend(double lifetimeCost) {
 
   const SttUsageTotals totals = SttUsageLog::totals();
   QMessageBox box;
-  box.setWindowTitle(QStringLiteral("九万 STT 費用提示"));
+  box.setWindowTitle(QStringLiteral("STT 費用提示"));
   box.setIcon(QMessageBox::Information);
   box.setText(
       QStringLiteral("Gemini STT 累計估算費用已超過 US$%1。")
