@@ -12,7 +12,7 @@ public:
   explicit CustomButton(int id, QWidget *parent = nullptr);
 
   void setText(const QString &text);
-  void setImage(const QString &imagePath);
+  void setImage(const QImage &image);
   void setBackgroundColor(const QColor &color);
   void setRadius(int r);
   void setOpacity(qreal opacity);

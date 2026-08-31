@@ -5,6 +5,12 @@ A Qt-based floating window UI for the Q9 input method engine on Linux (supportin
 
 ## Source Structure
 - `src/`: Core logic and UI
+  - `Database.cpp` / `.h`: every read of the shipped `dataset.db` - the 字碼
+    tables, 關聯字, 同音字 and 懶音字 (see below), 繁簡.
+  - `Q9Logic.cpp` / `.h`: the state machine behind the keypad. `showHomoFor` /
+    `showShortcutPage` / `showRelated` are the three lists a 長按 can open.
+  - `CustomEngine.cpp` / `.h`: the fcitx5 addon - key events (including the
+    長按 timers), the UI process and the IPC with it.
   - `UserDb.cpp` / `.h`: The user's own typing statistics (see 常用字調前
     below). Separate from `Database`, which only ever reads the shipped
     `dataset.db`.
@@ -19,9 +25,47 @@ A Qt-based floating window UI for the Q9 input method engine on Linux (supportin
   - `stt_prompt_off.txt` / `stt_prompt_only.txt` / `stt_prompt_both.txt` /
     `translate_prompt.txt`: the four default prompt templates (seed the
     user-editable copies) - one per 語音 translate mode, plus 譯 selection.
-  - `img/`: Button assets.
+  - `default90.png`: the 90 key images as one 9x10 grid - row 0 on top is
+    `0_1`..`0_9`, row 9 at the bottom is `9_1`..`9_9`. `main.cpp` slices it at
+    startup; any resolution works as long as it is a whole multiple of 9x10.
   - `dataset.db`: SQLite database for the engine. Read-only - on a root
     install it lives in `/usr/share` and could not be written anyway.
+
+## 同音字 + 懶音字 (homophones, near and exact)
+`Database::getHomo` returns the exact homophones first and the lazy-sound ones
+after them, so the characters the user already picks never get pushed off the
+first page.
+
+- `exactHomo`: the rows whose `word_meta.ping` is identical, same tone first.
+  This is the list 同音 has always shown; it now de-duplicates, since a
+  character with several 字碼 has one row per code and the self-join multiplies
+  them out again.
+- `nearHomo`: the rows whose `ping` only matches once both sides have been
+  through `fuzzyPing`, ordered by `MAX(freq)`, minus everything `exactHomo`
+  already returned.
+
+`fuzzyPing` works on the romanisation alone - **there is no per-character
+table anywhere**, so a rule can be added or dropped without touching the word
+list. It does two jobs in order:
+
+1. Puts both romanisations on the same footing. `ping` is mostly Yale (`ji`,
+   `yi`, `cheui`) with a few Jyutping strays (`zi`, `ci`, `ceoi`, `coek`);
+   without this those would not even match as *exact* homophones.
+   `z-`→`j-`, `c-`→`ch-`, `eoi/eon/eot`→`eui/eun/eut`, `oe`→`eu`.
+2. The 懶音 rules proper: a dropped `ng-` (`ngo`↔`o`), `n-`/`l-` (`naa`↔`laa`),
+   `gw-`/`g-` and `kw-`/`k-`, `aa`/`a`, `-ng`/`-n` (`sang`↔`san`), `-k`/`-t`
+   (`baak`↔`baat`).
+
+Bare `ng` and `m` (五, 唔) are syllabic nasals, not initials, so stripping them
+would leave nothing behind; they are joined by a two-entry table at the end
+instead, together with `o`/`a` so that 我 (`ngo`→`o`) reaches 啊 (`a`). A value
+in that table must not itself be another key - it is looked up once, not
+followed as a chain.
+
+The `fuzzyPing(ping) -> pings` map is built from the ~700 distinct `ping`
+values on first use and kept for the life of the process. A `dataset.db`
+without a usable `ping` column simply yields no near homophones, leaving 同音
+exactly as it was.
 
 ## 常用字調前 (frequency ordering)
 Optional, on by default, toggled in the 選字 group of the settings window
@@ -64,9 +108,45 @@ instead of starting from nothing.
 
 The setting itself is `system.freq_order` in `config.json`, read by the engine
 at startup beside `use_numpad`. The settings window edits it through
-`ConfigLoader::save` and sends `FREQ_ENABLED 0|1` so it also applies without a
-restart. Like the window position, it only persists where `config.json` is
+`ConfigLoader::save` and then sends `RELOAD_CONFIG`, so it also applies without
+a restart. Like the window position, it only persists where `config.json` is
 writable.
+
+## 長按 (long press)
+Four independently switchable long presses, all timed by the engine, all under
+`system` in `config.json` (`InputConfig`), all edited in the 長按 group of the
+settings window. `hold_ms` (0.15-1s, default 0.35s) is the threshold for the
+keypad; 錄音 keeps its own, longer one (`holdThresholdMs`, 0.5-2s) because it
+starts a recording and is meant to be harder to hit.
+
+| when | key | tap | 長按 | setting |
+| --- | --- | --- | --- | --- |
+| 選字中 | 1~9 | 出字 | that candidate's 同音 list | `hold_homo` |
+| 未打碼 | 0 | 標點 | 開關標點 (the bracket pairs) | `hold_openclose` |
+| 未打碼 | 1~9 | 開始打碼 | that digit's 速選 page | `hold_shortcut` |
+| any | 取消 | 取消 | 錄音 / 關聯字 / 速選 / 無效 | `cancel_hold` |
+
+**A key with a long press acts on release, not on press** - until the key is
+up there is no telling which of the two it was, and a character cannot be
+un-committed. `holdActionFor` works this out when the key goes down and returns
+`None` where the setting is off, in which case the key acts on press exactly as
+it did before. Mid-code digits are always part of the code and never hold.
+
+The long press runs the moment the threshold is reached, so the list appears
+while the key is still down; the release is then spent. If it had nothing to
+show - `showHomoFor` on a character with no homophones, `showShortcutPage` on
+an id the dataset lacks - it changes nothing and reports so, and the release
+goes on to do the ordinary thing rather than swallowing the keystroke.
+
+One digit is held at a time (`heldNum_`). Any *other* key arriving first
+settles it, so a rolled-over press cannot overtake the one before it, and a
+press for the key already down is auto-repeat and ignored. A focus change or a
+reset drops it without acting.
+
+`cancel_hold` picks what holding 取消 does; a short tap is always a plain
+Cancel. 錄音 needs STT configured and falls back to 無效 (long press does
+nothing, tap still cancels) when it is not - it never silently turns into one
+of the other actions.
 
 ## STT (語音輸入)
 Optional; off until the user enters a Gemini API key in the settings window
@@ -169,7 +249,13 @@ and the top-bar buttons carry no tooltips.
   `TR_SELECTION [base64]`
 - UI → Engine: `STT_ENABLED 0|1`, `STT_HOLD_MS <n>`, `STT_NEED_CONTEXT`,
   `TR_NEED_SELECTION`, `STT_PENDING`, `TR_PENDING after|replace`,
-  `AI_RESULT <base64>`, `AI_ABORT`
+  `AI_RESULT <base64>`, `AI_ABORT`, `RELOAD_CONFIG`
+
+`RELOAD_CONFIG` is not an STT message: the settings window sends it after
+writing `config.json` and the engine re-reads the `system` block from the file
+itself, rather than the two sides duplicating a line per setting. Key mappings
+and `use_numpad` are deliberately not re-applied - those are read once at
+startup, and re-binding a key that is currently down would strand it.
 
 `STT_PENDING` and `TR_PENDING` both raise the same `⏳` placeholder; the two
 flows share `AI_RESULT` / `AI_ABORT` to take it down again.
@@ -178,7 +264,8 @@ The hold threshold is a setting (0.5–2.0s), so the engine cannot hard-code it 
 `STT_HOLD_MS` is sent alongside `STT_ENABLED` whenever the settings change.
 
 The engine times the `取消` long-press itself (short tap is still a plain
-Cancel), supplies up to 200 chars of surrounding text cut at a punctuation
+Cancel, and 錄音 is only one of the four things the hold can be set to - see
+長按 above), supplies up to 200 chars of surrounding text cut at a punctuation
 boundary, and shows `⏳` as preedit while waiting — falling back to
 commit + `deleteSurroundingText` where preedit is unsupported.
 
@@ -191,7 +278,9 @@ right-hand end so the translation lands after the original.
 ## Configuration (config.json)
 - `window`: Default settings (width, height, constraints). Should not be modified at runtime.
 - `storage`: Runtime persistent state (last position, current size). Updated by `ConfigLoader::save`.
-- `system`: Runtime settings (numpad mode, output options, `freq_order`).
+- `system`: Runtime settings - numpad mode, output options, and the engine's
+  `InputConfig`: `freq_order`, `hold_homo`, `hold_openclose`, `hold_shortcut`,
+  `hold_ms`, `cancel_hold` (`stt` | `relate` | `shortcut` | `none`).
 - `buttons`: Layout definitions for the interface.
 - `key` / `altkey`: Keycode mappings.
 
@@ -234,6 +323,14 @@ right-hand end so the translation lands after the original.
   script refuses to start as root.
 
 ## Recent Changes
+- Added 懶音字: 同音 now lists the near homophones after the exact ones, matched
+  by collapsing the romanisation (`fuzzyPing`) rather than by any hand-written
+  character table.
+- Added four long presses (選字中 1~9 → 同音, 未打碼 0 → 開關標點, 未打碼
+  1~9 → 速選, and a choice of four things for 取消), each switchable in the new
+  長按 group of the settings window. Keys that can hold now act on release.
+- The settings window tells the engine to re-read `config.json`
+  (`RELOAD_CONFIG`) instead of sending one line per setting.
 - Added 常用字調前: the engine counts what the user types in a database of its
   own and uses it to reorder the second page of the 選字表 and the front of the
   下個字 list. Toggled in the new 選字 group of the settings window.

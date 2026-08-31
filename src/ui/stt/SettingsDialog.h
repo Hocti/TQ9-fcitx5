@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ConfigLoader.h"
 #include "SttSettings.h"
 
 #include <QDialog>
@@ -23,10 +24,10 @@ public:
   // Settings as saved by the user (valid after exec() returns Accepted).
   const SttSettings &settings() const { return m_settings; }
 
-  // 常用字調前 is not an STT setting - it lives in config.json and is only
-  // edited here, so it is handed in before exec() and read back after.
-  void setFrequencyOrder(bool on);
-  bool frequencyOrder() const;
+  // 選字 and 長按 are not STT settings - they live in config.json and are only
+  // edited here, so they are handed in before exec() and read back after.
+  void setInputConfig(const InputConfig &cfg);
+  InputConfig inputConfig() const;
 
 private:
   void loadIntoWidgets();
@@ -44,8 +45,15 @@ private:
   void openRecordingsFolder();
 
   SttSettings m_settings;
+  // Everything the dialog does not show is carried through untouched.
+  InputConfig m_input;
 
   QCheckBox *m_freqOrder = nullptr;
+  QCheckBox *m_holdHomo = nullptr;
+  QCheckBox *m_holdOpenClose = nullptr;
+  QCheckBox *m_holdShortcut = nullptr;
+  QDoubleSpinBox *m_holdKey = nullptr;
+  QButtonGroup *m_cancelHold = nullptr;
   QCheckBox *m_enabled = nullptr;
   QLineEdit *m_apiKey = nullptr;
   QLineEdit *m_speechLanguage = nullptr;

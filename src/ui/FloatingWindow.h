@@ -34,9 +34,10 @@ public:
   void setStatusText(const QString &text);
   QString getConfigPath() const { return m_baseConfig.configPath; }
 
-  // 常用字調前, kept in config.json's "system" section beside use_numpad.
-  bool freqOrder() const { return m_baseConfig.freq_order; }
-  void setFreqOrder(bool on) { m_baseConfig.freq_order = on; }
+  // The 選字 / 長按 settings, kept in config.json's "system" section beside
+  // use_numpad. The settings window edits them; saveConfig() writes them back.
+  const InputConfig &inputConfig() const { return m_baseConfig.input; }
+  void setInputConfig(const InputConfig &cfg) { m_baseConfig.input = cfg; }
 
   // Show window with proper LayerShell surface recreation
   void showWindow();

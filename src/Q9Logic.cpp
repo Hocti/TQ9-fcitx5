@@ -236,16 +236,7 @@ bool Q9Logic::processCommand(Q9Key cmd) {
     return true;
 
   case Q9Key::Relate:
-    // Show related characters for last word
-    if (!m_state.lastWord.empty()) {
-      m_state.homoMode = false;
-      m_state.statusPrefix = "[" + m_state.lastWord + "]關聯";
-      std::vector<std::string> relates = relatedFor(m_state.lastWord);
-      if (!relates.empty()) {
-        m_source = CandidateSource::Relate;
-        startSelectWord(relates);
-      }
-    }
+    showRelated();
     return true;
 
   case Q9Key::OpenClose: {
@@ -303,28 +294,13 @@ bool Q9Logic::processCommand(Q9Key cmd) {
   }
 
   case Q9Key::Shortcut:
-    // Quick selection shortcuts
+    // Quick selection shortcuts: the general page when nothing has been typed,
+    // that digit's page after a single digit.
     if (!m_state.candidateMode) {
-      if (m_state.inputCode.empty()) {
-        // Show general shortcuts (code 1000)
-        m_state.statusPrefix = "速選";
-        std::vector<std::string> words = db.getWords(1000);
-        if (!words.empty()) {
-          m_state.shortcutMode = true;
-          m_source = CandidateSource::Shortcut;
-          startSelectWord(words);
-        }
-      } else if (m_state.inputCode.length() == 1) {
-        // Show category shortcuts (code 1001-1009)
-        int digit = m_state.inputCode[0] - '0';
-        m_state.statusPrefix = "速選" + m_state.inputCode;
-        std::vector<std::string> words = db.getWords(1000 + digit);
-        if (!words.empty()) {
-          m_state.shortcutMode = true;
-          m_source = CandidateSource::Shortcut;
-          startSelectWord(words);
-        }
-      }
+      if (m_state.inputCode.empty())
+        showShortcutPage(0);
+      else if (m_state.inputCode.length() == 1)
+        showShortcutPage(m_state.inputCode[0] - '0');
     }
     return true;
 
@@ -343,6 +319,61 @@ bool Q9Logic::processCommand(Q9Key cmd) {
   default:
     return false;
   }
+}
+
+// 同音 for one candidate without committing it - what a long press on 1~9
+// does. Same as picking it with 同音 armed, minus the toggle.
+bool Q9Logic::showHomoFor(int index) {
+  if (index < 0 || index >= (int)m_state.pageCandidates.size())
+    return false;
+
+  const std::string word = m_state.pageCandidates[index];
+  if (word.empty() || word == "*")
+    return false;
+
+  std::vector<std::string> homos = db.getHomo(word);
+  if (homos.empty())
+    return false;
+
+  m_state.homoMode = false;
+  m_state.afterHomoMode = true; // so the 字碼 shows once one is picked
+  m_state.statusPrefix = "同音[" + word + "]";
+  m_source = CandidateSource::Homo;
+  startSelectWord(homos);
+  return true;
+}
+
+// 速選: 1000 is the general page, 1001-1009 the per-digit ones.
+bool Q9Logic::showShortcutPage(int digit) {
+  if (digit < 0 || digit > 9)
+    return false;
+
+  std::vector<std::string> words = db.getWords(1000 + digit);
+  if (words.empty())
+    return false;
+
+  m_state.statusPrefix =
+      digit == 0 ? "速選" : "速選" + std::to_string(digit);
+  m_state.shortcutMode = true;
+  m_source = CandidateSource::Shortcut;
+  startSelectWord(words);
+  return true;
+}
+
+// 下個字 for the last committed character.
+bool Q9Logic::showRelated() {
+  if (m_state.lastWord.empty())
+    return false;
+
+  std::vector<std::string> relates = relatedFor(m_state.lastWord);
+  if (relates.empty())
+    return false;
+
+  m_state.homoMode = false;
+  m_state.statusPrefix = "[" + m_state.lastWord + "]關聯";
+  m_source = CandidateSource::Relate;
+  startSelectWord(relates);
+  return true;
 }
 
 // Select word at index - mirrors C# selectWord(int inputInt)

@@ -1,5 +1,43 @@
 #include "Database.h"
+#include <cctype>
 #include <iostream>
+#include <unordered_set>
+
+namespace {
+
+// Exactly one UTF-8 character. 同音 only ever makes sense for a single one.
+bool isSingleChar(const std::string &s) {
+  if (s.empty())
+    return false;
+  const unsigned char c = static_cast<unsigned char>(s[0]);
+  size_t len = 1;
+  if ((c & 0x80) == 0)
+    len = 1;
+  else if ((c & 0xE0) == 0xC0)
+    len = 2;
+  else if ((c & 0xF0) == 0xE0)
+    len = 3;
+  else if ((c & 0xF8) == 0xF0)
+    len = 4;
+  return len == s.size();
+}
+
+void replaceAll(std::string &s, const std::string &from, const std::string &to) {
+  for (size_t at = s.find(from); at != std::string::npos;
+       at = s.find(from, at + to.size()))
+    s.replace(at, from.size(), to);
+}
+
+bool startsWith(const std::string &s, const char *prefix) {
+  return s.rfind(prefix, 0) == 0;
+}
+
+bool endsWith(const std::string &s, const std::string &suffix) {
+  return s.size() >= suffix.size() &&
+         s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+} // namespace
 
 Database::Database() {}
 
@@ -107,24 +145,211 @@ std::vector<std::string> Database::getRelate(const std::string &word) {
 }
 
 std::vector<std::string> Database::getHomo(const std::string &word) {
+  std::vector<std::string> results = exactHomo(word);
+  const std::vector<std::string> near = nearHomo(word, results);
+  results.insert(results.end(), near.begin(), near.end());
+  return results;
+}
+
+// 同音字: the rows whose `ping` is identical, same tone first. This is the list
+// the 同音 key has always shown.
+std::vector<std::string> Database::exactHomo(const std::string &word) {
   std::vector<std::string> results;
+  if (!isSingleChar(word))
+    return results;
+
   sqlite3_stmt *stmt;
   // Q9Core.cs: complex query
   std::string sql = "SELECT w1.char FROM word_meta w1 INNER JOIN word_meta w2 "
                     "ON w1.ping = w2.ping WHERE w2.char = ? ORDER BY CASE WHEN "
                     "w1.ping2 = w2.ping2 THEN 0 ELSE 1 END ASC;";
 
+  std::unordered_set<std::string> seen;
   if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, 0) == SQLITE_OK) {
     sqlite3_bind_text(stmt, 1, word.c_str(), -1, SQLITE_STATIC);
     while (sqlite3_step(stmt) == SQLITE_ROW) {
       const unsigned char *text = sqlite3_column_text(stmt, 0);
-      if (text) {
-        results.push_back(std::string(reinterpret_cast<const char *>(text)));
-      }
+      if (!text)
+        continue;
+      std::string s(reinterpret_cast<const char *>(text));
+      // The same character can hold several rows (one per code), and the join
+      // multiplies them out again.
+      if (seen.insert(s).second)
+        results.push_back(s);
     }
   }
   sqlite3_finalize(stmt);
   return results;
+}
+
+// 懶音字: the characters whose `ping` only matches once both sides have been
+// through fuzzyPing() - 我 (`ngo`) reaching the `o` and `a` characters, 發
+// (`faat`) reaching `fat`, and so on. Always appended after the exact
+// homophones, so the characters the user already picks never get pushed off
+// the first page.
+//
+// `skip` is what exactHomo() has already returned. A dataset without `ping`
+// simply yields nothing here, leaving 同音 exactly as it was.
+std::vector<std::string> Database::nearHomo(const std::string &word,
+                                            const std::vector<std::string> &skip) {
+  std::vector<std::string> results;
+  if (!isSingleChar(word))
+    return results;
+
+  const std::vector<std::string> own = pingsOf(word);
+  if (own.empty())
+    return results;
+
+  // The character's own pings are exactHomo()'s business, not ours.
+  const std::unordered_set<std::string> mine(own.begin(), own.end());
+  std::vector<std::string> want;
+  std::unordered_set<std::string> queued;
+  for (const auto &ping : own) {
+    const auto group = fuzzyGroups().find(fuzzyPing(ping));
+    if (group == fuzzyGroups().end())
+      continue;
+    for (const auto &other : group->second) {
+      if (mine.count(other) == 0 && queued.insert(other).second)
+        want.push_back(other);
+    }
+  }
+  if (want.empty())
+    return results;
+
+  std::string sql = "SELECT char FROM word_meta WHERE ping IN (";
+  for (size_t i = 0; i < want.size(); ++i)
+    sql += i == 0 ? "?" : ",?";
+  sql += ") AND char <> '' GROUP BY char ORDER BY MAX(freq) DESC";
+
+  std::unordered_set<std::string> seen(skip.begin(), skip.end());
+  seen.insert(word);
+
+  sqlite3_stmt *stmt;
+  if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, 0) == SQLITE_OK) {
+    for (size_t i = 0; i < want.size(); ++i)
+      sqlite3_bind_text(stmt, static_cast<int>(i + 1), want[i].c_str(), -1,
+                        SQLITE_STATIC);
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+      const unsigned char *text = sqlite3_column_text(stmt, 0);
+      if (!text)
+        continue;
+      std::string s(reinterpret_cast<const char *>(text));
+      if (seen.insert(s).second)
+        results.push_back(s);
+    }
+  } else {
+    std::cerr << "[Database] nearHomo: prepare failed: " << sqlite3_errmsg(db)
+              << std::endl;
+  }
+  sqlite3_finalize(stmt);
+  return results;
+}
+
+std::vector<std::string> Database::pingsOf(const std::string &word) {
+  std::vector<std::string> results;
+  sqlite3_stmt *stmt;
+  std::string sql = "SELECT DISTINCT ping FROM word_meta WHERE char = ? AND "
+                    "ping IS NOT NULL AND ping <> ''";
+
+  if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, 0) == SQLITE_OK) {
+    sqlite3_bind_text(stmt, 1, word.c_str(), -1, SQLITE_STATIC);
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+      const unsigned char *text = sqlite3_column_text(stmt, 0);
+      if (text)
+        results.push_back(std::string(reinterpret_cast<const char *>(text)));
+    }
+  }
+  sqlite3_finalize(stmt);
+  return results;
+}
+
+const std::unordered_map<std::string, std::vector<std::string>> &
+Database::fuzzyGroups() {
+  if (fuzzyLoaded_)
+    return fuzzy_;
+  fuzzyLoaded_ = true; // one attempt, even if the column is not there
+
+  sqlite3_stmt *stmt;
+  std::string sql = "SELECT DISTINCT ping FROM word_meta WHERE ping IS NOT "
+                    "NULL AND ping <> ''";
+
+  if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, 0) == SQLITE_OK) {
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+      const unsigned char *text = sqlite3_column_text(stmt, 0);
+      if (!text)
+        continue;
+      std::string ping(reinterpret_cast<const char *>(text));
+      fuzzy_[fuzzyPing(ping)].push_back(ping);
+    }
+  } else {
+    std::cerr << "[Database] fuzzyGroups: prepare failed: "
+              << sqlite3_errmsg(db) << std::endl;
+  }
+  sqlite3_finalize(stmt);
+  std::cerr << "[Database] 懶音 groups: " << fuzzy_.size() << std::endl;
+  return fuzzy_;
+}
+
+// A `ping` reduced to what the 懶音 rules cannot tell apart. Purely a string
+// transform - which characters exist never enters into it, so a rule can be
+// added or dropped without touching the word table.
+//
+// 1. First put both romanisations on the same footing. `word_meta.ping` is
+//    mostly Yale (`ji`, `yi`, `cheui`) with a few Jyutping strays (`zi`, `ci`,
+//    `ceoi`, `coek`); without this those would not even match as exact
+//    homophones. `z-`->`j-`, `c-`->`ch-`, `eoi/eon/eot`->`eui/eun/eut`,
+//    `oe`->`eu`.
+// 2. Then the lazy-sound rules proper: a dropped `ng-`, `n-`/`l-`, `gw-`/`g-`
+//    and `kw-`/`k-`, `aa`/`a`, `-ng`/`-n`, `-k`/`-t`.
+//
+// Bare `ng` and `m` (五, 唔) are syllabic nasals, not initials, so stripping
+// them would leave nothing behind - they are grouped by the table at the end
+// instead, together with `o`/`a` so that 我 (`ngo` -> `o`) reaches 啊 (`a`).
+std::string Database::fuzzyPing(const std::string &raw) {
+  std::string s;
+  s.reserve(raw.size());
+  for (char c : raw) {
+    if (!std::isspace(static_cast<unsigned char>(c)))
+      s += static_cast<char>(
+          std::tolower(static_cast<unsigned char>(c)));
+  }
+  if (s.empty())
+    return s;
+
+  // ---- 1. romanisation (Jyutping -> Yale) ----
+  if (s[0] == 'z')
+    s = "j" + s.substr(1);
+  else if (s[0] == 'c' && !startsWith(s, "ch"))
+    s = "ch" + s.substr(1);
+  replaceAll(s, "eoi", "eui");
+  replaceAll(s, "eon", "eun");
+  replaceAll(s, "eot", "eut");
+  replaceAll(s, "oe", "eu");
+
+  // ---- 2. initials ----
+  if (startsWith(s, "ng") && s.size() > 2)
+    s = s.substr(2); // ngo -> o
+  else if (s != "ng" && s[0] == 'n' && s.size() > 1)
+    s = "l" + s.substr(1);
+  if (startsWith(s, "gw"))
+    s = "g" + s.substr(2);
+  else if (startsWith(s, "kw"))
+    s = "k" + s.substr(2);
+
+  // ---- 3. finals ----
+  replaceAll(s, "aa", "a");
+  if (endsWith(s, "ng"))
+    s = s.substr(0, s.size() - 2) + "n";
+  if (endsWith(s, "k"))
+    s[s.size() - 1] = 't';
+
+  // Groups the rules above cannot reach. The value must not itself be another
+  // key - this is looked up once, not followed as a chain.
+  if (s == "o")
+    return "a"; // 我 (ngo -> o) has to find 啊 (a)
+  if (s == "n")
+    return "m"; // syllabic nasals: 五 (ng -> n) and 唔 (m)
+  return s;
 }
 
 std::string Database::tcsc(const std::string &input) {

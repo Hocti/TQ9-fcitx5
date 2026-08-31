@@ -1,5 +1,4 @@
 #include "CustomButton.h"
-#include <QDebug>
 #include <QMouseEvent>
 #include <QPainter>
 
@@ -13,15 +12,8 @@ void CustomButton::setText(const QString &text) {
   update();
 }
 
-void CustomButton::setImage(const QString &imagePath) {
-  if (imagePath.isEmpty()) {
-    m_image = QImage();
-    update();
-    return;
-  }
-  if (!m_image.load(imagePath)) {
-    qWarning() << "Failed to load image:" << imagePath;
-  }
+void CustomButton::setImage(const QImage &image) {
+  m_image = image;
   update();
 }
 

@@ -72,12 +72,11 @@ CustomEngine::CustomEngine(fcitx::Instance *instance) : instance_(instance) {
 
   // Load config for key mappings FIRST - we derive database path from config
   // location
-  std::string configPath = fcitx::StandardPath::global().locate(
-      fcitx::StandardPath::Type::PkgData, "tq9/config.json");
+  std::string cfgPath = configPath();
 
-  if (!configPath.empty()) {
+  if (!cfgPath.empty()) {
     // Derive database path from config path (same directory)
-    std::string dataDir = configPath.substr(0, configPath.rfind('/'));
+    std::string dataDir = cfgPath.substr(0, cfgPath.rfind('/'));
     std::string dbPath = dataDir + "/dataset.db";
 
     // What the user types is counted in a database of its own, in the user's
@@ -85,7 +84,7 @@ CustomEngine::CustomEngine(fcitx::Instance *instance) : instance_(instance) {
     // install and must not be written to in any case.
     std::string userDbPath = userPkgData + "/tq9/user_stats.db";
 
-    std::cerr << "[CustomEngine] Config path: " << configPath << std::endl;
+    std::cerr << "[CustomEngine] Config path: " << cfgPath << std::endl;
     std::cerr << "[CustomEngine] Database path: " << dbPath << std::endl;
     std::cerr << "[CustomEngine] User stats path: " << userDbPath << std::endl;
 
@@ -97,9 +96,9 @@ CustomEngine::CustomEngine(fcitx::Instance *instance) : instance_(instance) {
                 << std::endl;
     }
 
-    AppConfig config = ConfigLoader::load(QString::fromStdString(configPath));
+    AppConfig config = ConfigLoader::load(QString::fromStdString(cfgPath));
     use_numpad_ = config.use_numpad;
-    logic_.setFrequencyOrder(config.freq_order);
+    applyInputConfig(config.input);
 
     // Build altkey -> num mapping (for num0~num9)
     // Config stores Windows VK codes (uppercase ASCII for letters: A=65, X=88,
@@ -144,9 +143,37 @@ CustomEngine::CustomEngine(fcitx::Instance *instance) : instance_(instance) {
                 << " -> keysym " << keysym << std::endl;
     }
 
-    std::cerr << "[CustomEngine] use_numpad=" << use_numpad_
-              << " freq_order=" << config.freq_order << std::endl;
+    std::cerr << "[CustomEngine] use_numpad=" << use_numpad_ << std::endl;
   }
+}
+
+std::string CustomEngine::configPath() const {
+  return fcitx::StandardPath::global().locate(
+      fcitx::StandardPath::Type::PkgData, "tq9/config.json");
+}
+
+// The settings window writes config.json and then tells us to pick it up, so
+// the 選字 and 長按 settings apply without a restart. Key mappings and
+// use_numpad are deliberately left alone: those are read once at startup, and
+// re-binding keys under a key that is currently down would strand it.
+void CustomEngine::reloadConfig() {
+  const std::string path = configPath();
+  if (path.empty())
+    return;
+  applyInputConfig(ConfigLoader::load(QString::fromStdString(path)).input);
+}
+
+void CustomEngine::applyInputConfig(const InputConfig &cfg) {
+  input_ = cfg;
+  keyHoldUsec_ = static_cast<uint64_t>(cfg.hold_ms) * 1000;
+  logic_.setFrequencyOrder(cfg.freq_order);
+
+  std::cerr << "[CustomEngine] input: freq_order=" << cfg.freq_order
+            << " hold_homo=" << cfg.hold_homo
+            << " hold_openclose=" << cfg.hold_openclose
+            << " hold_shortcut=" << cfg.hold_shortcut
+            << " hold_ms=" << cfg.hold_ms << " cancel_hold="
+            << cancelHoldToString(cfg.cancel_hold).toStdString() << std::endl;
 }
 
 CustomEngine::~CustomEngine() {
@@ -209,17 +236,15 @@ void CustomEngine::spawnUI() {
         });
 
     // Send Config Init
-    std::string configPath = fcitx::StandardPath::global().locate(
-        fcitx::StandardPath::Type::PkgData, "tq9/config.json");
+    std::string cfgPath = configPath();
 
-    std::cerr << "[CustomEngine] Config Path: '" << configPath << "'"
-              << std::endl;
+    std::cerr << "[CustomEngine] Config Path: '" << cfgPath << "'" << std::endl;
 
-    if (configPath.empty()) {
+    if (cfgPath.empty()) {
       std::cerr << "[CustomEngine] ERROR: Config file not found!" << std::endl;
     }
 
-    sendToUI("INIT " + configPath);
+    sendToUI("INIT " + cfgPath);
   }
 }
 
@@ -266,26 +291,10 @@ void CustomEngine::handleUILine(const std::string &line) {
       return;
     }
     if (activeContext_) {
-      bool changed = false;
-      if (id <= 9) {
-        changed = logic_.processKey(id);
-      } else if (id == 10) {
-        changed = logic_.processCommand(Q9Key::Cancel);
-      } else if (id == 0) {
-        // Button 0 -> Page Down in Candidate Mode?
-        // Logic handles 0 as NextPage or similar if mapped?
-        changed = logic_.processKey(0);
-      }
-
-      if (logic_.hasCommitString()) {
-        activeContext_->commitString(logic_.getCommitString());
-        logic_.clearCommitString();
-        changed = true;
-      }
-
-      if (changed) {
-        updateUIState();
-      }
+      if (id >= 0 && id <= 9)
+        applyKey(id, activeContext_);
+      else if (id == 10)
+        applyCommand(Q9Key::Cancel, activeContext_);
     }
   } else if (line.rfind("FOCUS_TRUE", 0) == 0) {
     // UI has focus, do not hide.
@@ -310,11 +319,9 @@ void CustomEngine::handleUILine(const std::string &line) {
       std::cerr << "[CustomEngine] STT hold threshold=" << ms << "ms"
                 << std::endl;
     }
-  } else if (line.rfind("FREQ_ENABLED ", 0) == 0) {
-    // 常用字調前, toggled in the settings window - applies without a restart.
-    const bool on = (line.substr(13) == "1");
-    logic_.setFrequencyOrder(on);
-    std::cerr << "[CustomEngine] freq_order=" << on << std::endl;
+  } else if (line == "RELOAD_CONFIG") {
+    // The settings window has just written config.json.
+    reloadConfig();
   } else if (line == "STT_NEED_CONTEXT") {
     sendSurroundingTextToUI();
   } else if (line == "TR_NEED_SELECTION") {
@@ -353,10 +360,13 @@ void CustomEngine::deactivate(const fcitx::InputMethodEntry &entry,
   // activeContext_ = nullptr; // Commented out to allow committing to
   // background app if floating window takes focus
 
-  // Don't leave a push-to-talk hanging if focus moves away mid-press.
+  // Don't leave a push-to-talk, or a key waiting for its release, hanging if
+  // focus moves away mid-press.
+  dropHeldKey();
   cancelHoldTimer_.reset();
   translateCollapseTimer_.reset();
   cancelKeyDown_ = false;
+  cancelFired_ = false;
   if (sttRecording_) {
     sttRecording_ = false;
     sendToUI("STT_STOP");
@@ -375,6 +385,9 @@ void CustomEngine::deactivate(const fcitx::InputMethodEntry &entry,
 
 void CustomEngine::reset(const fcitx::InputMethodEntry &entry,
                          fcitx::InputContextEvent &event) {
+  // Whatever the held key was going to do, it is not going to do it here.
+  dropHeldKey();
+
   Q9State state = logic_.getState();
 
   // Only reset if there's actual input state (candidateMode or inputCode)
@@ -402,26 +415,21 @@ bool CustomEngine::isCancelKey(const fcitx::Key &key) const {
   return it != altKeyToCmd_.end() && it->second == Q9Key::Cancel;
 }
 
-void CustomEngine::applyCancelCommand() {
-  bool changed = logic_.processCommand(Q9Key::Cancel);
-  if (logic_.hasCommitString()) {
-    if (activeContext_)
-      activeContext_->commitString(logic_.getCommitString());
-    logic_.clearCommitString();
-    changed = true;
-  }
-  if (changed)
-    updateUIState();
+// 錄音 is only on offer once STT is configured; with it off the key falls back
+// to having no long press at all rather than to a different one.
+CancelHold CustomEngine::cancelHoldAction() const {
+  if (input_.cancel_hold == CancelHold::Stt && !sttEnabled_)
+    return CancelHold::None;
+  return input_.cancel_hold;
 }
 
-// Press-and-hold on 取消 starts recording; a short tap is a plain Cancel.
-// Returns true when the event was consumed here.
-bool CustomEngine::handleCancelKeyForStt(fcitx::KeyEvent &keyEvent) {
+// Press-and-hold on 取消; a short tap is a plain Cancel either way.
+void CustomEngine::handleCancelHold(fcitx::KeyEvent &keyEvent) {
   keyEvent.filterAndAccept();
 
   if (keyEvent.isRelease()) {
     if (!cancelKeyDown_)
-      return true;
+      return;
     cancelKeyDown_ = false;
     cancelHoldTimer_.reset();
 
@@ -430,38 +438,230 @@ bool CustomEngine::handleCancelKeyForStt(fcitx::KeyEvent &keyEvent) {
                 << std::endl;
       sttRecording_ = false;
       sendToUI("STT_STOP");
-    } else {
-      // Released before the threshold - ordinary Cancel.
+    } else if (!cancelFired_) {
+      // Released before the threshold, or the long press found nothing to
+      // show - ordinary Cancel.
       std::cerr << "[CustomEngine] cancel tapped (short) - normal Cancel"
                 << std::endl;
-      applyCancelCommand();
+      applyCommand(Q9Key::Cancel, keyEvent.inputContext());
     }
-    return true;
+    return;
   }
 
   // Auto-repeat sends press after press; only the first one starts the clock.
   if (cancelKeyDown_)
-    return true;
+    return;
 
-  std::cerr << "[CustomEngine] cancel pressed - hold timer armed" << std::endl;
   cancelKeyDown_ = true;
+  cancelFired_ = false;
   sttRecording_ = false;
 
-  uint64_t timeout = fcitx::now(CLOCK_MONOTONIC) + sttHoldUsec_;
+  const CancelHold action = cancelHoldAction();
+  // 錄音 keeps its own threshold (0.5-2s, set by the user): it starts a
+  // recording and is meant to be harder to hit than an ordinary long press.
+  const uint64_t hold =
+      action == CancelHold::Stt ? sttHoldUsec_ : keyHoldUsec_;
+
+  std::cerr << "[CustomEngine] cancel pressed - hold timer armed" << std::endl;
+  uint64_t timeout = fcitx::now(CLOCK_MONOTONIC) + hold;
   cancelHoldTimer_ = instance_->eventLoop().addTimeEvent(
       CLOCK_MONOTONIC, timeout, 0,
-      [this](fcitx::EventSourceTime *, uint64_t) {
+      [this, action](fcitx::EventSourceTime *, uint64_t) {
         cancelHoldTimer_.reset();
         if (!cancelKeyDown_)
           return true;
-        std::cerr << "[CustomEngine] cancel held - sending STT_START"
-                  << std::endl;
-        sttRecording_ = true;
-        sendToUI("STT_START");
+
+        switch (action) {
+        case CancelHold::Stt:
+          std::cerr << "[CustomEngine] cancel held - sending STT_START"
+                    << std::endl;
+          sttRecording_ = true;
+          cancelFired_ = true;
+          sendToUI("STT_START");
+          break;
+        case CancelHold::Relate:
+          cancelFired_ = logic_.showRelated();
+          break;
+        case CancelHold::Shortcut:
+          cancelFired_ = logic_.showShortcutPage(0);
+          break;
+        case CancelHold::None:
+          break;
+        }
+
+        // Neither 關聯字 nor 速選 commits anything; they only open a list.
+        if (cancelFired_ && action != CancelHold::Stt)
+          applyLogicResult(true, nullptr);
         return true;
       });
+}
 
-  return true;
+// ---- 長按 on 0-9 ------------------------------------------------------------
+
+// What holding this digit would do right now. None means the key keeps acting
+// on press, exactly as it did before long presses existed.
+CustomEngine::HoldAction CustomEngine::holdActionFor(int num) const {
+  // While picking a candidate: 同音 for that candidate. 0 is 下頁 and has no
+  // long press of its own.
+  if (logic_.inCandidateMode())
+    return (num >= 1 && input_.hold_homo) ? HoldAction::Homo : HoldAction::None;
+
+  // Only with nothing typed yet - mid-code every digit is part of the code.
+  if (logic_.hasInputCode())
+    return HoldAction::None;
+
+  if (num == 0)
+    return input_.hold_openclose ? HoldAction::OpenClose : HoldAction::None;
+  return input_.hold_shortcut ? HoldAction::Shortcut : HoldAction::None;
+}
+
+void CustomEngine::armKeyHold(int num, HoldAction action) {
+  heldNum_ = num;
+  heldAction_ = action;
+  heldFired_ = false;
+
+  uint64_t timeout = fcitx::now(CLOCK_MONOTONIC) + keyHoldUsec_;
+  keyHoldTimer_ = instance_->eventLoop().addTimeEvent(
+      CLOCK_MONOTONIC, timeout, 0,
+      [this](fcitx::EventSourceTime *, uint64_t) {
+        keyHoldTimer_.reset();
+        if (heldNum_ >= 0)
+          heldFired_ = fireKeyHold();
+        return true;
+      });
+}
+
+// Runs when the hold threshold is reached. False means there was nothing to
+// show, and the release goes on to do the ordinary thing - better than leaving
+// the user holding a key that swallowed their keystroke.
+bool CustomEngine::fireKeyHold() {
+  bool ok = false;
+  switch (heldAction_) {
+  case HoldAction::Homo:
+    ok = logic_.showHomoFor(heldNum_ - 1);
+    break;
+  case HoldAction::OpenClose:
+    ok = logic_.processCommand(Q9Key::OpenClose);
+    break;
+  case HoldAction::Shortcut:
+    ok = logic_.showShortcutPage(heldNum_);
+    break;
+  case HoldAction::None:
+    break;
+  }
+
+  if (ok) {
+    std::cerr << "[CustomEngine] key " << heldNum_ << " held" << std::endl;
+    applyLogicResult(true, nullptr);
+  }
+  return ok;
+}
+
+void CustomEngine::flushHeldKey(fcitx::InputContext *ic) {
+  if (heldNum_ < 0)
+    return;
+
+  const int num = heldNum_;
+  const bool fired = heldFired_;
+  dropHeldKey();
+
+  // A press that never became a long one was a tap after all.
+  if (!fired)
+    applyKey(num, ic);
+}
+
+void CustomEngine::dropHeldKey() {
+  keyHoldTimer_.reset();
+  heldNum_ = -1;
+  heldAction_ = HoldAction::None;
+  heldFired_ = false;
+}
+
+// ---- key dispatch ----------------------------------------------------------
+
+CustomEngine::KeyRole CustomEngine::resolveKey(const fcitx::Key &key, int &num,
+                                               Q9Key &cmd) const {
+  const int sym = key.sym();
+
+  if (use_numpad_) {
+    if (!key.isKeyPad())
+      return KeyRole::None;
+
+    if (sym >= FcitxKey_KP_0 && sym <= FcitxKey_KP_9) {
+      num = sym - FcitxKey_KP_0;
+      return KeyRole::Digit;
+    }
+    switch (sym) {
+    case FcitxKey_KP_Decimal:
+      cmd = Q9Key::Cancel;
+      return KeyRole::Command;
+    case FcitxKey_KP_Add:
+      cmd = Q9Key::Relate;
+      return KeyRole::Command;
+    case FcitxKey_KP_Subtract:
+      // 速選 when not picking, 上頁 when picking - applyCommand decides.
+      cmd = Q9Key::Shortcut;
+      return KeyRole::Command;
+    case FcitxKey_KP_Multiply:
+      cmd = Q9Key::Homo;
+      return KeyRole::Command;
+    case FcitxKey_KP_Divide:
+      cmd = Q9Key::OpenClose;
+      return KeyRole::Command;
+    default:
+      return KeyRole::None;
+    }
+  }
+
+  // Alt key mode (non-numpad) - for keyboards without a numpad
+  auto numIt = altKeyToNum_.find(sym);
+  if (numIt != altKeyToNum_.end()) {
+    num = numIt->second;
+    return KeyRole::Digit;
+  }
+
+  auto cmdIt = altKeyToCmd_.find(sym);
+  if (cmdIt != altKeyToCmd_.end()) {
+    cmd = cmdIt->second;
+    return KeyRole::Command;
+  }
+
+  // Block the other letter keys so they cannot type through the input method
+  // (mirroring the C# behaviour for keyCode 65-90).
+  if (sym >= 'a' && sym <= 'z')
+    return KeyRole::Swallow;
+
+  return KeyRole::None;
+}
+
+void CustomEngine::applyLogicResult(bool changed, fcitx::InputContext *ic) {
+  if (!ic)
+    ic = activeContext_;
+
+  if (logic_.hasCommitString()) {
+    if (ic) {
+      ic->commitString(logic_.getCommitString());
+      // A bracket pair leaves the cursor between its two halves.
+      if (logic_.wantsCursorLeft())
+        ic->forwardKey(fcitx::Key(FcitxKey_Left));
+    }
+    logic_.clearCommitString();
+    changed = true;
+  }
+
+  if (changed)
+    updateUIState();
+}
+
+void CustomEngine::applyKey(int num, fcitx::InputContext *ic) {
+  applyLogicResult(logic_.processKey(num), ic);
+}
+
+void CustomEngine::applyCommand(Q9Key cmd, fcitx::InputContext *ic) {
+  // 速選 and 上頁 share one key; which one it is depends on the state now.
+  if (cmd == Q9Key::Shortcut && logic_.inCandidateMode())
+    cmd = Q9Key::PrevPage;
+  applyLogicResult(logic_.processCommand(cmd), ic);
 }
 
 void CustomEngine::sendSurroundingTextToUI() {
@@ -621,122 +821,61 @@ void CustomEngine::keyEvent(const fcitx::InputMethodEntry &entry,
                             fcitx::KeyEvent &keyEvent) {
   auto key = keyEvent.key();
 
-  // 取消 doubles as push-to-talk once STT is configured, so it needs both
-  // edges of the key.
-  if (sttEnabled_ && isCancelKey(key)) {
-    handleCancelKeyForStt(keyEvent);
+  // 取消 needs both edges of the key whenever holding it means something.
+  if (isCancelKey(key) && cancelHoldAction() != CancelHold::None) {
+    // A digit still waiting for its release is settled first, so its character
+    // cannot land after the Cancel that was meant to follow it.
+    if (!keyEvent.isRelease())
+      flushHeldKey(keyEvent.inputContext());
+    handleCancelHold(keyEvent);
     return;
   }
 
-  if (keyEvent.isRelease())
+  int num = -1;
+  Q9Key cmd = Q9Key::Cancel;
+  const KeyRole role = resolveKey(key, num, cmd);
+  if (role == KeyRole::None)
     return;
 
-  bool handled = false;
-  bool changed = false;
-  int sym = key.sym();
+  // Both edges of a key we take are swallowed, so the client never sees half
+  // of one - the press of a long-pressable digit does nothing by itself.
+  keyEvent.filterAndAccept();
 
-  // When use_numpad is true, handle numpad keys
-  // When use_numpad is false, handle alt keys (regular letter keys)
-
-  if (use_numpad_) {
-    // Numpad mode - original behavior
-    if (key.isKeyPad()) {
-      // Numpad 0-9
-      if (sym >= FcitxKey_KP_0 && sym <= FcitxKey_KP_9) {
-        int num = sym - FcitxKey_KP_0;
-        changed = logic_.processKey(num);
-        handled = true;
-      }
-      // Numpad . (decimal) = Cancel
-      else if (sym == FcitxKey_KP_Decimal) {
-        changed = logic_.processCommand(Q9Key::Cancel);
-        handled = true;
-      }
-      // Numpad + = Relate
-      else if (sym == FcitxKey_KP_Add) {
-        changed = logic_.processCommand(Q9Key::Relate);
-        handled = true;
-      }
-      // Numpad - = Shortcut (when not in select mode) or PrevPage (in select
-      // mode)
-      else if (sym == FcitxKey_KP_Subtract) {
-        Q9State state = logic_.getState();
-        if (state.candidateMode) {
-          changed = logic_.processCommand(Q9Key::PrevPage);
-        } else {
-          changed = logic_.processCommand(Q9Key::Shortcut);
-        }
-        handled = true;
-      }
-      // Numpad * = Homo (toggle homophone mode)
-      else if (sym == FcitxKey_KP_Multiply) {
-        changed = logic_.processCommand(Q9Key::Homo);
-        handled = true;
-      }
-      // Numpad / = OpenClose (bracket pairs)
-      else if (sym == FcitxKey_KP_Divide) {
-        changed = logic_.processCommand(Q9Key::OpenClose);
-        handled = true;
-      }
-    }
-  } else {
-    // Alt key mode (non-numpad) - for keyboards without numpad
-    // Check for num0~num9 alt keys
-    auto numIt = altKeyToNum_.find(sym);
-    if (numIt != altKeyToNum_.end()) {
-      int num = numIt->second;
-      changed = logic_.processKey(num);
-      handled = true;
-    } else {
-      // Check for command alt keys
-      auto cmdIt = altKeyToCmd_.find(sym);
-      if (cmdIt != altKeyToCmd_.end()) {
-        Q9Key cmd = cmdIt->second;
-
-        // Special handling for shortcut/prev - same key, different behavior
-        if (cmd == Q9Key::Shortcut) {
-          Q9State state = logic_.getState();
-          if (state.candidateMode) {
-            changed = logic_.processCommand(Q9Key::PrevPage);
-          } else {
-            changed = logic_.processCommand(Q9Key::Shortcut);
-          }
-        } else {
-          changed = logic_.processCommand(cmd);
-        }
-        handled = true;
-      } else if (sym >= 'a' && sym <= 'z') {
-        // Block other letter keys when in non-numpad mode to prevent typing
-        // (mirroring C# behavior that returns true for keyCode >= 65 && keyCode
-        // <= 90)
-        handled = true;
-      }
-    }
+  if (keyEvent.isRelease()) {
+    if (role == KeyRole::Digit && num == heldNum_)
+      flushHeldKey(keyEvent.inputContext());
+    return;
   }
 
-  if (handled) {
-    keyEvent.filterAndAccept();
+  // Auto-repeat sends press after press; the first one has been taken already.
+  if (role == KeyRole::Digit && num == heldNum_)
+    return;
 
-    // Check for commit
-    if (logic_.hasCommitString()) {
-      std::string commitStr = logic_.getCommitString();
+  // Any other key settles whatever is still down first, so a rolled-over
+  // press cannot overtake the one before it.
+  flushHeldKey(keyEvent.inputContext());
 
-      // Commit the string
-      keyEvent.inputContext()->commitString(commitStr);
-
-      // Check if we need to move cursor left (e.g. for bracket pairs)
-      Q9State state = logic_.getState();
-      if (state.moveCursorLeft) {
-        keyEvent.inputContext()->forwardKey(fcitx::Key(FcitxKey_Left));
-      }
-      logic_.clearCommitString();
-      changed = true;
-    }
-
-    if (changed) {
-      updateUIState();
-    }
+  switch (role) {
+  case KeyRole::Swallow:
+    return;
+  case KeyRole::Command:
+    applyCommand(cmd, keyEvent.inputContext());
+    return;
+  case KeyRole::Digit:
+    break;
+  default:
+    return;
   }
+
+  const HoldAction hold = holdActionFor(num);
+  if (hold == HoldAction::None) {
+    applyKey(num, keyEvent.inputContext());
+    return;
+  }
+
+  // The key can still turn into a long press, so its ordinary action waits for
+  // the release: a candidate must not be committed before we know which it is.
+  armKeyHold(num, hold);
 }
 
 void CustomEngine::updateUIState() {
@@ -828,7 +967,6 @@ void CustomEngine::updateUIState() {
 std::vector<fcitx::InputMethodEntry> CustomEngine::listInputMethods() {
   std::vector<fcitx::InputMethodEntry> entries;
   auto &entry = entries.emplace_back("tq9", "TQ9", "zh_HK", "tq9");
-  // entry.setIcon("tq9");
   entry.setLabel("HK");
   return entries;
 }

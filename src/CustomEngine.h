@@ -36,10 +36,42 @@ private:
   void handleUILine(const std::string &line);
   void updateUIState();
 
-  // STT
+  // ---- key handling ----
+  // What one key means to us. Swallow is the non-numpad mode blocking the
+  // letter keys so they cannot type through the input method.
+  enum class KeyRole { None, Digit, Command, Swallow };
+  KeyRole resolveKey(const fcitx::Key &key, int &num, Q9Key &cmd) const;
+
+  // Commit, cursor move and UI refresh for whatever the logic just did. One
+  // path for a key, for the deferred release of a held key, and for a click on
+  // the floating window. `ic` falls back to the active context.
+  void applyLogicResult(bool changed, fcitx::InputContext *ic);
+  void applyKey(int num, fcitx::InputContext *ic);
+  void applyCommand(Q9Key cmd, fcitx::InputContext *ic);
+
+  // ---- 長按 on the keypad ----
+  // What holding a digit would do, decided when the key goes down.
+  enum class HoldAction { None, Homo, OpenClose, Shortcut };
+  HoldAction holdActionFor(int num) const;
+  void armKeyHold(int num, HoldAction action);
+  bool fireKeyHold();
+  // The key is up, or another key arrived: a press that never became a long
+  // one still owes its ordinary action.
+  void flushHeldKey(fcitx::InputContext *ic);
+  void dropHeldKey();
+
+  // 長按 取消: 錄音 unless the settings say otherwise, and never 錄音 while
+  // STT is off.
+  CancelHold cancelHoldAction() const;
   bool isCancelKey(const fcitx::Key &key) const;
-  bool handleCancelKeyForStt(fcitx::KeyEvent &keyEvent);
-  void applyCancelCommand();
+  void handleCancelHold(fcitx::KeyEvent &keyEvent);
+
+  // ---- config ----
+  std::string configPath() const;
+  void reloadConfig();
+  void applyInputConfig(const InputConfig &cfg);
+
+  // STT
   void sendSurroundingTextToUI();
   void sendSelectionToUI();
   void showSttPlaceholder();
@@ -54,6 +86,9 @@ private:
 
   // Config - loaded from UI on INIT response
   bool use_numpad_ = true;
+  // 選字 / 長按 settings, re-read on RELOAD_CONFIG.
+  InputConfig input_;
+  uint64_t keyHoldUsec_ = 350000;
   std::unordered_map<int, int> altKeyToNum_;   // Maps key code -> num (0-9)
   std::unordered_map<int, Q9Key> altKeyToCmd_; // Maps key code -> command
 
@@ -77,10 +112,19 @@ private:
   // Accumulates partial reads from the UI's stdout until a full line arrives
   std::string uiReadBuffer_;
 
+  // ---- 長按 state ----
+  // The one digit key currently down, -1 when none. While it is set the key's
+  // ordinary action has not run yet - it waits for the release.
+  int heldNum_ = -1;
+  HoldAction heldAction_ = HoldAction::None;
+  bool heldFired_ = false; // the long press already ran; the release is spent
+  std::unique_ptr<fcitx::EventSource> keyHoldTimer_;
+
   // ---- STT state ----
-  // Mirrors the UI's setting; when false the 取消 key behaves as before.
+  // Mirrors the UI's setting; when false 錄音 is not an option for 取消.
   bool sttEnabled_ = false;
   bool cancelKeyDown_ = false;  // guards against X11 auto-repeat
+  bool cancelFired_ = false;    // the 取消 long press already ran
   uint64_t sttHoldUsec_ = 500000; // hold before recording, set by the UI
   bool sttRecording_ = false;   // we told the UI to start recording
   std::unique_ptr<fcitx::EventSource> cancelHoldTimer_;

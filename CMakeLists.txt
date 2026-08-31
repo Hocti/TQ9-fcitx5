@@ -165,12 +165,5 @@ install(FILES data/stt_prompt_off.txt
               data/translate_prompt.txt
         DESTINATION "${CMAKE_INSTALL_DATADIR}/fcitx5/tq9")
 install(FILES data/dataset.db DESTINATION "${CMAKE_INSTALL_DATADIR}/fcitx5/tq9")
-install(FILES data/icons/16x16/tq9.png DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/16x16/apps")
-install(FILES data/icons/24x24/tq9.png DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/24x24/apps")
-install(FILES data/icons/32x32/tq9.png DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/32x32/apps")
-install(FILES data/icons/48x48/tq9.png DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/48x48/apps")
-install(FILES data/icons/64x64/tq9.png DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/64x64/apps")
-install(FILES data/icons/128x128/tq9.png DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/128x128/apps")
-install(FILES data/icons/256x256/tq9.png DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/256x256/apps")
-install(FILES data/icons/48x48/tq9.png DESTINATION "${CMAKE_INSTALL_DATADIR}/fcitx5/inputmethod")
-install(DIRECTORY data/img DESTINATION "${CMAKE_INSTALL_DATADIR}/fcitx5/tq9")
+# The 90 key images as one 9x10 sheet; the UI slices it at startup.
+install(FILES data/default90.png DESTINATION "${CMAKE_INSTALL_DATADIR}/fcitx5/tq9")

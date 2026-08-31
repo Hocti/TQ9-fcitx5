@@ -86,7 +86,24 @@ public:
   bool processCommand(Q9Key cmd);
   void reset();
 
+  // The three lists a long press can open. Each returns false, having changed
+  // nothing, when there is nothing to show - the caller then treats the press
+  // as an ordinary tap rather than leaving the user holding a key for nothing.
+  //
+  // 同音 for the candidate at `index` on the page now on screen.
+  bool showHomoFor(int index);
+  // 速選: one of the 1~9 category pages, or the general page for 0.
+  bool showShortcutPage(int digit);
+  // 下個字 for the character last committed.
+  bool showRelated();
+
   Q9State getState() const;
+
+  // Cheap reads of the bits the engine needs on every keystroke - getState()
+  // copies the whole candidate list.
+  bool inCandidateMode() const { return m_state.candidateMode; }
+  bool hasInputCode() const { return !m_state.inputCode.empty(); }
+  bool wantsCursorLeft() const { return m_state.moveCursorLeft; }
   std::string getCommitString() const; // If logic decides to commit
   bool hasCommitString() const;
   void clearCommitString();

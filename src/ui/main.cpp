@@ -8,9 +8,9 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QImage>
-#include <QMap>
 #include <QSocketNotifier>
 #include <QString>
+#include <QVector>
 #include <iostream>
 #include <sqlite3.h>
 #include <unistd.h>
@@ -18,34 +18,61 @@
 // LayerShellQt for Wayland always-on-top
 #include <LayerShellQt/Shell>
 
-// Global image cache
-static QMap<QString, QImage> g_imageCache;
+// The 90 button images, sliced out of the sprite sheet: row r of the sheet
+// holds keys r_1..r_9 left to right, so key "r_i" sits at index r * 9 + i - 1.
+static QVector<QImage> g_buttonImages;
 
 // Global database handle
 static sqlite3 *g_db = nullptr;
 
-// Load all images from data/img directory
+// The image for key <type>_<index>, or a null image when it was not loaded.
+static QImage buttonImage(int type, int index) {
+  if (type < 0 || type > 9 || index < 1 || index > 9)
+    return QImage();
+  int pos = type * 9 + index - 1;
+  return pos < g_buttonImages.size() ? g_buttonImages[pos] : QImage();
+}
+
+// Slice data/default90.png - one 9x10 grid of key images - into g_buttonImages.
+// Any resolution works as long as it is a whole multiple of 9x10.
 static void loadAllImages(const QString &basePath) {
-  QString imgPath = basePath + "/img";
-  std::cerr << "[UI] Loading images from: " << imgPath.toStdString()
+  QString sheetPath = basePath + "/default90.png";
+  std::cerr << "[UI] Loading image sheet: " << sheetPath.toStdString()
             << std::endl;
 
-  int loadedCount = 0;
-  for (int i = 0; i <= 9; ++i) {
-    for (int j = 1; j <= 9; ++j) {
-      QString filename = QString("%1_%2.png").arg(i).arg(j);
-      QString fullPath = imgPath + "/" + filename;
-      QImage img;
-      if (img.load(fullPath)) {
-        g_imageCache[filename] = img;
-        loadedCount++;
-      } else {
-        std::cerr << "[UI] Warning: Failed to load image: "
-                  << fullPath.toStdString() << std::endl;
-      }
+  g_buttonImages.clear();
+
+  QImage sheet;
+  if (!sheet.load(sheetPath)) {
+    std::cerr << "[UI] Error: Failed to load image sheet: "
+              << sheetPath.toStdString() << std::endl;
+    return;
+  }
+
+  int cellW = sheet.width() / 9;
+  int cellH = sheet.height() / 10;
+  if (cellW <= 0 || cellH <= 0) {
+    std::cerr << "[UI] Error: image sheet " << sheet.width() << "x"
+              << sheet.height() << " is too small to slice into 9x10"
+              << std::endl;
+    return;
+  }
+  if (sheet.width() % 9 != 0 || sheet.height() % 10 != 0) {
+    std::cerr << "[UI] Warning: image sheet " << sheet.width() << "x"
+              << sheet.height()
+              << " is not a whole multiple of 9x10; the remainder is dropped"
+              << std::endl;
+  }
+
+  g_buttonImages.reserve(90);
+  for (int row = 0; row <= 9; ++row) {
+    for (int col = 0; col < 9; ++col) {
+      g_buttonImages.append(sheet.copy(col * cellW, row * cellH, cellW, cellH));
     }
   }
-  std::cerr << "[UI] Loaded " << loadedCount << " images" << std::endl;
+
+  std::cerr << "[UI] Sliced " << g_buttonImages.size() << " button images of "
+            << cellW << "x" << cellH << std::endl;
 }
 
 // Load SQLite database
@@ -64,17 +91,14 @@ static bool loadDatabase(const QString &basePath) {
   return true;
 }
 
-// Initialize buttons with default images (0_1.png~0_9.png) - matches C#
+// Initialize buttons with default images (0_1~0_9) - matches C#
 // setButtonImg(0)
-static void initializeButtons(FloatingWindow &window, const QString &basePath) {
-  QString imgPath = basePath + "/img";
-
-  // Set 0_1.png ~ 0_9.png on buttons 1-9 with no text (default/reset state)
+static void initializeButtons(FloatingWindow &window) {
+  // Set 0_1 ~ 0_9 on buttons 1-9 with no text (default/reset state)
   for (int i = 1; i <= 9; ++i) {
     CustomButton *btn = window.getButton(i);
     if (btn) {
-      QString imagePath = imgPath + QString("/0_%1.png").arg(i);
-      btn->setImage(imagePath);
+      btn->setImage(buttonImage(0, i));
       btn->setText(""); // No text in default state
       btn->setBackgroundColor(Qt::white);
       btn->setDisabledState(false);
@@ -87,7 +111,7 @@ static void initializeButtons(FloatingWindow &window, const QString &basePath) {
   CustomButton *btn0 = window.getButton(0);
   if (btn0) {
     btn0->setText("標點");
-    btn0->setImage("");
+    btn0->setImage(QImage());
     btn0->setBackgroundColor(Qt::white);
     btn0->setDisabledState(false);
     btn0->setOpacity(1);
@@ -96,11 +120,11 @@ static void initializeButtons(FloatingWindow &window, const QString &basePath) {
   CustomButton *btn10 = window.getButton(10);
   if (btn10) {
     btn10->setText("取消");
-    btn10->setImage("");
+    btn10->setImage(QImage());
     btn10->setBackgroundColor(Qt::white);
   }
 
-  std::cerr << "[UI] Buttons initialized with default images (0_*.png)"
+  std::cerr << "[UI] Buttons initialized with default images (0_*)"
             << std::endl;
 }
 
@@ -185,8 +209,6 @@ int main(int argc, char *argv[]) {
     sendToEngine(QString("STT_ENABLED %1").arg(sttOn ? 1 : 0));
     // The engine times the 取消 long-press itself, so it needs the threshold.
     sendToEngine(QString("STT_HOLD_MS %1").arg(stt.settings().holdThresholdMs));
-    // 常用字調前 lives in config.json, which only this side reads.
-    sendToEngine(QString("FREQ_ENABLED %1").arg(window.freqOrder() ? 1 : 0));
   };
   QObject::connect(&stt, &SttController::enabledChanged,
                    [applyAvailability](bool) { applyAvailability(); });
@@ -200,13 +222,16 @@ int main(int argc, char *argv[]) {
   QObject::connect(&window, &FloatingWindow::settingsRequested,
                    [&stt, &window, applyAvailability]() {
                      SettingsDialog dialog;
-                     // Not an STT setting: it comes from config.json and goes
-                     // back there, the dialog only edits it.
-                     dialog.setFrequencyOrder(window.freqOrder());
+                     // Not STT settings: 選字 and 長按 come from config.json
+                     // and go back there, the dialog only edits them.
+                     dialog.setInputConfig(window.inputConfig());
                      if (dialog.exec() == QDialog::Accepted) {
                        stt.reloadSettings();
-                       window.setFreqOrder(dialog.frequencyOrder());
+                       window.setInputConfig(dialog.inputConfig());
                        window.saveConfig();
+                       // config.json is written by now, so the engine can
+                       // pick the new values up without a restart.
+                       sendToEngine("RELOAD_CONFIG");
                        applyAvailability();
                      }
                    });
@@ -239,11 +264,9 @@ int main(int argc, char *argv[]) {
           std::cerr << "[UI] Hiding window" << std::endl;
           window.hide();
         } else if (line == "RESET") {
-          // Reset buttons to default state (0_*.png images, matching C#
+          // Reset buttons to default state (0_* images, matching C#
           // cancel()/setButtonImg(0))
-          QFileInfo configInfo(window.getConfigPath());
-          QString dataPath = configInfo.absolutePath();
-          initializeButtons(window, dataPath);
+          initializeButtons(window);
           window.reset();
           window.raise();
         } else if (line == "QUIT") {
@@ -269,7 +292,7 @@ int main(int argc, char *argv[]) {
           loadDatabase(dataPath);
 
           // Initialize buttons with images and Chinese text
-          initializeButtons(window, dataPath);
+          initializeButtons(window);
 
           // STT: the installed default prompts live beside config.json.
           // Seed every editable copy now - all four are listed in the settings
@@ -312,7 +335,8 @@ int main(int argc, char *argv[]) {
                   QString text = item.mid(colIdx + 1);
                   CustomButton *btn = window.getButton(id);
                   if (btn) {
-                    btn->setImage(""); // Clear image for text display
+                    btn->setImage(
+                        QImage()); // Clear image for text display
                     btn->setOpacity(1);
                     if (text.isEmpty() || text == "*") {
                       btn->setText("");
@@ -329,8 +353,8 @@ int main(int argc, char *argv[]) {
             }
           }
         } else if (line.startsWith("SET_IMAGES ")) {
-          // SET_IMAGES <type> - set button 1-9 images to type_1.png through
-          // type_9.png
+          // SET_IMAGES <type> - set button 1-9 images to type_1 through
+          // type_9
           QString content = line.mid(11).trimmed();
           bool ok;
           int imageType = content.toInt(&ok);
@@ -340,15 +364,10 @@ int main(int argc, char *argv[]) {
             imageType = 0;
           }
           if (ok && imageType >= 0) {
-            QFileInfo configInfo(window.getConfigPath());
-            QString imgPath = configInfo.absolutePath() + "/img";
-
             for (int i = 1; i <= 9; ++i) {
               CustomButton *btn = window.getButton(i);
               if (btn) {
-                QString imagePath =
-                    imgPath + QString("/%1_%2.png").arg(imageType).arg(i);
-                btn->setImage(imagePath);
+                btn->setImage(buttonImage(imageType, i));
                 btn->setText(""); // No text overlay during input mode
                 btn->setBackgroundColor(Qt::white);
                 btn->setDisabledState(false);
@@ -364,16 +383,14 @@ int main(int argc, char *argv[]) {
           // SET_RELATED id:text|id:text... - show related words with images
           // visible
           QString content = line.mid(11).trimmed();
-          QFileInfo configInfo(window.getConfigPath());
-          QString imgPath = configInfo.absolutePath() + "/img";
 
           // First reset images to base (type 10 shows through)
           for (int i = 1; i <= 9; ++i) {
             CustomButton *btn = window.getButton(i);
             if (btn) {
-              QString imagePath = imgPath + QString("/0_%1.png").arg(i);
-              btn->setImage(imagePath);
+              btn->setImage(buttonImage(0, i));
               btn->setBackgroundColor(Qt::white);
+              btn->setDisabledState(false);
               btn->setOpacity(1);
             }
           }
@@ -414,8 +431,10 @@ int main(int argc, char *argv[]) {
                 CustomButton *btn = window.getButton(id);
                 if (btn) {
                   btn->setText(text);
-                  btn->setImage("");
+                  btn->setImage(QImage());
                   btn->setBackgroundColor(Qt::white);
+                  btn->setDisabledState(false);
+                  btn->setOpacity(1);
                 }
               }
             }

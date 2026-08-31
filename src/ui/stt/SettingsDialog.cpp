@@ -69,6 +69,56 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
 
   root->addWidget(inputBox);
 
+  // ---- 長按 -------------------------------------------------------------
+  auto *holdBox = new QGroupBox(QStringLiteral("長按"), page);
+  auto *holdForm = new QFormLayout(holdBox);
+
+  m_holdKey = new QDoubleSpinBox(holdBox);
+  m_holdKey->setRange(kKeyHoldMinMs / 1000.0, kKeyHoldMaxMs / 1000.0);
+  m_holdKey->setDecimals(2);
+  m_holdKey->setSingleStep(0.05);
+  m_holdKey->setSuffix(QStringLiteral(" 秒"));
+  holdForm->addRow(QStringLiteral("按住多久才算長按"), m_holdKey);
+
+  m_holdHomo =
+      new QCheckBox(QStringLiteral("選字時長按 1~9：該字的同音字"), holdBox);
+  holdForm->addRow(m_holdHomo);
+
+  auto *homoHint = new QLabel(
+      QStringLiteral("開了之後 1~9 放手才出字，按住不放就轉為揀同音字。"),
+      holdBox);
+  homoHint->setWordWrap(true);
+  homoHint->setStyleSheet(QStringLiteral("color: gray;"));
+  holdForm->addRow(homoHint);
+
+  m_holdOpenClose =
+      new QCheckBox(QStringLiteral("未打碼時長按 0：開關標點"), holdBox);
+  holdForm->addRow(m_holdOpenClose);
+
+  m_holdShortcut =
+      new QCheckBox(QStringLiteral("未打碼時長按 1~9：該數字的速選頁"), holdBox);
+  holdForm->addRow(m_holdShortcut);
+
+  m_cancelHold = new QButtonGroup(this);
+  const std::pair<const char *, CancelHold> cancelHolds[] = {
+      {"錄音", CancelHold::Stt},
+      {"關聯字", CancelHold::Relate},
+      {"速選", CancelHold::Shortcut},
+      {"無效", CancelHold::None},
+  };
+  holdForm->addRow(QStringLiteral("長按 取消 鍵"),
+                   makeRadioRow(holdBox, m_cancelHold, cancelHolds));
+
+  auto *cancelHint = new QLabel(
+      QStringLiteral("短按一律是取消。選了錄音而未設定語音輸入時，"
+                     "長按當作無效。"),
+      holdBox);
+  cancelHint->setWordWrap(true);
+  cancelHint->setStyleSheet(QStringLiteral("color: gray;"));
+  holdForm->addRow(cancelHint);
+
+  root->addWidget(holdBox);
+
   // ---- 語音輸入 ---------------------------------------------------------
   auto *form = new QFormLayout();
 
@@ -320,12 +370,32 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent) {
   configureDialogForLayerShell(this);
 }
 
-void SettingsDialog::setFrequencyOrder(bool on) {
-  m_freqOrder->setChecked(on);
+void SettingsDialog::setInputConfig(const InputConfig &cfg) {
+  m_input = cfg;
+  m_freqOrder->setChecked(cfg.freq_order);
+  m_holdHomo->setChecked(cfg.hold_homo);
+  m_holdOpenClose->setChecked(cfg.hold_openclose);
+  m_holdShortcut->setChecked(cfg.hold_shortcut);
+  m_holdKey->setValue(cfg.hold_ms / 1000.0);
+  if (QAbstractButton *button =
+          m_cancelHold->button(static_cast<int>(cfg.cancel_hold)))
+    button->setChecked(true);
 }
 
-bool SettingsDialog::frequencyOrder() const {
-  return m_freqOrder->isChecked();
+InputConfig SettingsDialog::inputConfig() const {
+  InputConfig cfg = m_input;
+  cfg.freq_order = m_freqOrder->isChecked();
+  cfg.hold_homo = m_holdHomo->isChecked();
+  cfg.hold_openclose = m_holdOpenClose->isChecked();
+  cfg.hold_shortcut = m_holdShortcut->isChecked();
+  cfg.hold_ms =
+      std::clamp(static_cast<int>(qRound(m_holdKey->value() * 1000.0)),
+                 kKeyHoldMinMs, kKeyHoldMaxMs);
+
+  const int cancelId = m_cancelHold->checkedId();
+  if (cancelId >= 0)
+    cfg.cancel_hold = static_cast<CancelHold>(cancelId);
+  return cfg;
 }
 
 void SettingsDialog::loadIntoWidgets() {
